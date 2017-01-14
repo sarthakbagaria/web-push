@@ -8,13 +8,13 @@ module Web.WebPush
     , vapidPublicKeyBytes
     , sendPushNotification
     -- * Types
-    , VAPIDKeys 
+    , VAPIDKeys
     , VAPIDKeysMinDetails(..)
     , PushNotificationDetails(..)
     , PushNotificationMessage(..)
     , PushNotificationError(..)
     ) where
-    
+
 import Data.ByteString                                         (ByteString)
 import GHC.Int                                                 (Int64)
 import qualified Data.ByteString                 as BS
@@ -80,6 +80,7 @@ type VAPIDKeys = ECDSA.KeyPair
 -- Store them in configuration and use them across multiple push notification requests.
 generateVAPIDKeys :: MonadRandom m => m VAPIDKeysMinDetails
 generateVAPIDKeys = do
+    -- NOTE: SEC_p256r1 is the NIST P-256
     (pubKey, privKey) <- ECC.generate $ ECC.getCurveByName ECC.SEC_p256r1
     let ECC.Point pubX pubY = ECDSA.public_q pubKey
     return $ VAPIDKeysMinDetails { privateNumber = ECDSA.private_d privKey
@@ -87,7 +88,7 @@ generateVAPIDKeys = do
                                  , publicCoordY = pubY
                                  }
 
-      
+
 -- |Read VAPID key pair from the 3 integers minimally representing a unique key pair.
 readVAPIDKeys :: VAPIDKeysMinDetails -> VAPIDKeys
 readVAPIDKeys VAPIDKeysMinDetails {..} =
@@ -96,7 +97,7 @@ readVAPIDKeys VAPIDKeysMinDetails {..} =
 
 
 -- |Pass the VAPID public key bytes to front end when subscribing to push notifications.
--- 
+--
 -- Generate application server key using
 -- applicationServerKey = new Uint8Array(vapidPublicKeyBytes) in Javascript
 vapidPublicKeyBytes :: VAPIDKeys -> [Word8]
@@ -104,7 +105,7 @@ vapidPublicKeyBytes keys =
    let ECC.Point vapidPublicKeyX vapidPublicKeyY = ECDSA.public_q $ ECDSA.toPublicKey keys
    -- First byte 04 tells that the EC key is uncompressed
    in 4 : ( (extract32Bytes vapidPublicKeyX) ++ (extract32Bytes vapidPublicKeyY) )
-      
+
    where
        -- an array of bytes
        -- 32 steps (32 bytes)
@@ -131,7 +132,7 @@ sendPushNotification vapidKeys httpManager pushNotification = do
         Left exc@(SomeException _) -> return $ Left $ EndpointParseFailed exc
         Right initReq -> do
             time <- liftIO $ getCurrentTime
-            
+
             -- JWT encryption for VAPID
             eitherJwt <- do
                 let ECC.Point publicKeyX publicKeyY = ECDSA.public_q $ ECDSA.toPublicKey vapidKeys
@@ -181,7 +182,7 @@ sendPushNotification vapidKeys httpManager pushNotification = do
                 {-
                 -- Manual implementation without using the JWT libraries
                 -- This works as well,
-                -- kept here mainly to understanding the process
+                -- kept here mainly as process explanation
 
                 -- JWT base 64 encoding is without padding
                 let messageForJWTSignature = let encodedJWTPayload = b64UrlNoPadding $ LB.toStrict $ A.encode $ A.object $
@@ -407,7 +408,7 @@ data PushNotificationDetails = PushNotificationDetails { endpoint :: Text
                                                        , expireInHours :: Int64
                                                        , message :: PushNotificationMessage
                                                        }
-                               
+
 
 data PushNotificationMessage = PushNotificationMessage { title :: Text
                                                        , body :: Text
@@ -415,7 +416,7 @@ data PushNotificationMessage = PushNotificationMessage { title :: Text
                                                        , url :: Text
                                                        , tag :: Text
                                                        }
-                               
+
 instance ToJSON PushNotificationMessage where
     toJSON PushNotificationMessage {..} = A.object
         [ "title" .= title

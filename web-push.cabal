@@ -1,6 +1,6 @@
 name:                web-push
 version:             0.1.0.0
-synopsis:            Helper functions to send messages using Web Push protocol.
+synopsis:            Send messages using Web Push protocol.
 description:         Please see README.md
 homepage:            https://github.com/sarthakbagaria/web-push#readme
 license:             MIT
