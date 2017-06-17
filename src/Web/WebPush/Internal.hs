@@ -24,6 +24,7 @@ import Crypto.JWT                                              (createJWSJWT, Cl
 import qualified Crypto.JWT                      as JWT
 import qualified Crypto.JOSE.JWK                 as JWK
 import Crypto.JOSE.JWS                                         (JWSHeader(..), Alg(ES256))
+import qualified Crypto.JOSE.Header              as JOSE.Header
 import qualified Crypto.JOSE.Types               as JOSE
 import qualified Crypto.JOSE.Compact             as JOSE.Compact
 import qualified Crypto.JOSE.Error               as JOSE.Error
@@ -38,6 +39,7 @@ import qualified Data.Bits                       as Bits
 import qualified Data.ByteArray                  as ByteArray
 
 import Control.Monad.IO.Class                                  (MonadIO, liftIO)
+import Control.Monad.Except                                    (runExceptT)
 
 
 
@@ -53,44 +55,40 @@ webPushJWT vapidKeys vapidClaims = do
     let ECC.Point publicKeyX publicKeyY = ECDSA.public_q $ ECDSA.toPublicKey vapidKeys
         privateKeyNumber = ECDSA.private_d $ ECDSA.toPrivateKey vapidKeys
 
-    eitherJwtData <- liftIO $ createJWSJWT (JWK.fromKeyMaterial $ JWK.ECKeyMaterial $
-                                               JWK.ECKeyParameters { JWK.ecKty = JWK.EC
-                                                                   , JWK.ecCrv = JWK.P_256
-                                                                   , JWK.ecX = JOSE.SizedBase64Integer 32 $ publicKeyX
-                                                                   , JWK.ecY = JOSE.SizedBase64Integer 32 $ publicKeyY
-                                                                   , JWK.ecD = Just $ JOSE.SizedBase64Integer 32 $ privateKeyNumber
-                                                                   }
-                                          )
+    liftIO $ runExceptT $ do
+        jwtData <- createJWSJWT ( JWK.fromKeyMaterial $ JWK.ECKeyMaterial $
+                                     JWK.ECKeyParameters { JWK.ecKty = JWK.EC
+                                                         , JWK.ecCrv = JWK.P_256
+                                                         , JWK.ecX = JOSE.SizedBase64Integer 32 $ publicKeyX
+                                                         , JWK.ecY = JOSE.SizedBase64Integer 32 $ publicKeyY
+                                                         , JWK.ecD = Just $ JOSE.SizedBase64Integer 32 $ privateKeyNumber
+                                                         }
+                                )
+                                ( JWSHeader { _jwsHeaderAlg = JOSE.Header.HeaderParam JOSE.Header.Protected ES256
+                                            , _jwsHeaderJku = Nothing
+                                            , _jwsHeaderJwk = Nothing
+                                            , _jwsHeaderKid = Nothing
+                                            , _jwsHeaderX5u = Nothing
+                                            , _jwsHeaderX5c = Nothing
+                                            , _jwsHeaderX5t = Nothing
+                                            , _jwsHeaderX5tS256 = Nothing
+                                            , _jwsHeaderTyp = Just (JOSE.Header.HeaderParam JOSE.Header.Protected "JWT")
+                                            , _jwsHeaderCty = Nothing
+                                            , _jwsHeaderCrit = Nothing
+                                            }
+                                )
+                                ( ClaimsSet { _claimIss = Nothing
+                                            , _claimSub = Just $ vapidSub $ vapidClaims
+                                            , _claimAud = Just $ vapidAud $ vapidClaims
+                                            , _claimExp = Just $ vapidExp $ vapidClaims
+                                            , _claimNbf = Nothing
+                                            , _claimIat = Nothing
+                                            , _claimJti = Nothing
+                                            , _unregisteredClaims = HM.empty
+                                            }
+                                )
 
-                                          ( JWSHeader { headerAlg = Just ES256
-                                                      , headerJku = Nothing
-                                                      , headerJwk = Nothing
-                                                      , headerKid = Nothing
-                                                      , headerX5u = Nothing
-                                                      , headerX5c = Nothing
-                                                      , headerX5t = Nothing
-                                                      , headerX5tS256 = Nothing
-                                                      , headerTyp = Just "JWT"
-                                                      , headerCty = Nothing
-                                                      , headerCrit = Nothing
-                                                      }
-                                          )
-
-                                          ( ClaimsSet { _claimIss = Nothing
-                                                      , _claimSub = Just $ vapidSub $ vapidClaims
-                                                      , _claimAud = Just $ vapidAud $ vapidClaims
-                                                      , _claimExp = Just $ vapidExp $ vapidClaims
-                                                      , _claimNbf = Nothing
-                                                      , _claimIat = Nothing
-                                                      , _claimJti = Nothing
-                                                      , _unregisteredClaims = HM.empty
-                                                      }
-                                          )
-
-    case eitherJwtData of
-        Left err -> return $ Left err
-        Right jwtData -> return $ JOSE.Compact.encodeCompact $ jwtData
-
+        JOSE.Compact.encodeCompact $ jwtData
 
             ----------------------------
             {-

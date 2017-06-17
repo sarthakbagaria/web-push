@@ -48,7 +48,7 @@ import qualified Data.ByteString.Base64.URL.Lazy as B64.URL.Lazy
 import Data.Time.Clock                                         (getCurrentTime)
 import Data.Time                                               (addUTCTime)
 
-import Network.HTTP.Client                                     (Manager, httpLbs, parseRequest, HttpException(StatusCodeException), RequestBody(..), requestBody, requestHeaders, method, host, secure)
+import Network.HTTP.Client                                     (Manager, httpLbs, parseRequest, HttpException(HttpExceptionRequest), HttpExceptionContent(StatusCodeException), RequestBody(..), requestBody, requestHeaders, method, host, secure, responseStatus)
 import Network.HTTP.Types                                      (hContentType, hAuthorization, hContentEncoding)
 import Network.HTTP.Types.Status                               (Status(statusCode))
 
@@ -123,8 +123,9 @@ sendPushNotification vapidKeys httpManager pushNotification = do
         Left exc@(SomeException _) -> return $ Left $ EndpointParseFailed exc
         Right initReq -> do
             time <- liftIO $ getCurrentTime
-            eitherJwt <- webPushJWT vapidKeys $ VAPIDClaims { vapidAud = JWT.Special $ JWT.fromString $ TE.decodeUtf8With TE.lenientDecode $
-                                                                             BS.append (if secure initReq then "https://" else "http://") (host initReq)
+            eitherJwt <- webPushJWT vapidKeys $ VAPIDClaims { vapidAud =  JWT.Audience [ JWT.fromString $ TE.decodeUtf8With TE.lenientDecode $
+                                                                                             BS.append (if secure initReq then "https://" else "http://") (host initReq)
+                                                                                       ]
                                                             , vapidSub = JWT.fromString $ T.append "mailto:" $ senderEmail pushNotification
                                                             , vapidExp = NumericDate $ addUTCTime 3000 time
                                                             }
@@ -185,9 +186,9 @@ sendPushNotification vapidKeys httpManager pushNotification = do
                             eitherResp <- runCatchT $ liftIO $ httpLbs request httpManager
                             case eitherResp of
                                 Left err@(SomeException _) -> case fromException err of
-                                    Just (StatusCodeException status _ _)
+                                    Just (HttpExceptionRequest _ (StatusCodeException resp _))
                                         -- when the endpoint is invalid, we need to remove it from database
-                                        |(statusCode status == 404) -> return $ Left RecepientEndpointNotFound
+                                        |(statusCode (responseStatus resp) == 404) -> return $ Left RecepientEndpointNotFound
                                     _ -> return $ Left $ PushRequestFailed err
                                 Right _ -> return $ Right ()
 
