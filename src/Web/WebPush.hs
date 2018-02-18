@@ -36,6 +36,7 @@ import Data.Text                                               (Text)
 import qualified Data.Text                       as T
 import qualified Data.Text.Encoding              as TE
 import qualified Data.Text.Encoding.Error        as TE
+import Data.String                                             (IsString(fromString))
 import Data.Monoid                                             ((<>))
 import qualified Data.ByteString.Lazy            as LB
 import qualified Data.ByteString                 as BS
@@ -123,10 +124,10 @@ sendPushNotification vapidKeys httpManager pushNotification = do
         Left exc@(SomeException _) -> return $ Left $ EndpointParseFailed exc
         Right initReq -> do
             time <- liftIO $ getCurrentTime
-            eitherJwt <- webPushJWT vapidKeys $ VAPIDClaims { vapidAud =  JWT.Audience [ JWT.fromString $ TE.decodeUtf8With TE.lenientDecode $
+            eitherJwt <- webPushJWT vapidKeys $ VAPIDClaims { vapidAud =  JWT.Audience [ fromString $ T.unpack $ TE.decodeUtf8With TE.lenientDecode $
                                                                                              BS.append (if secure initReq then "https://" else "http://") (host initReq)
                                                                                        ]
-                                                            , vapidSub = JWT.fromString $ T.append "mailto:" $ senderEmail pushNotification
+                                                            , vapidSub = fromString $ T.unpack $ T.append "mailto:" $ senderEmail pushNotification
                                                             , vapidExp = NumericDate $ addUTCTime 3000 time
                                                             }
             case eitherJwt of

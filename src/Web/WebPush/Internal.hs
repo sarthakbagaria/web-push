@@ -8,8 +8,6 @@ import qualified Data.ByteString                 as BS
 import qualified Data.ByteString.Lazy            as LB
 import Data.Monoid                                             ((<>))
 import Data.Text                                               (Text)
-import qualified Data.HashMap.Strict             as HM
-
 
 import qualified Crypto.PubKey.ECC.Types         as ECC
 import qualified Crypto.PubKey.ECC.ECDSA         as ECDSA
@@ -20,11 +18,10 @@ import Crypto.Cipher.AES                                       (AES128)
 import qualified Crypto.Cipher.Types             as Cipher
 import Crypto.Error                                            (CryptoFailable(CryptoPassed,CryptoFailed), CryptoError)
 
-import Crypto.JWT                                              (createJWSJWT, ClaimsSet(..))
+import Crypto.JWT                                              (signClaims, emptyClaimsSet, claimSub, claimAud, claimExp)
 import qualified Crypto.JWT                      as JWT
 import qualified Crypto.JOSE.JWK                 as JWK
-import Crypto.JOSE.JWS                                         (JWSHeader(..), Alg(ES256))
-import qualified Crypto.JOSE.Header              as JOSE.Header
+import Crypto.JOSE.JWS                                         (newJWSHeader, Alg(ES256))
 import qualified Crypto.JOSE.Types               as JOSE
 import qualified Crypto.JOSE.Compact             as JOSE.Compact
 import qualified Crypto.JOSE.Error               as JOSE.Error
@@ -41,6 +38,8 @@ import qualified Data.ByteArray                  as ByteArray
 import Control.Monad.IO.Class                                  (MonadIO, liftIO)
 import Control.Monad.Except                                    (runExceptT)
 
+import Control.Lens.Operators                                  ((&), (.~))
+
 
 
 type VAPIDKeys = ECDSA.KeyPair
@@ -56,39 +55,21 @@ webPushJWT vapidKeys vapidClaims = do
         privateKeyNumber = ECDSA.private_d $ ECDSA.toPrivateKey vapidKeys
 
     liftIO $ runExceptT $ do
-        jwtData <- createJWSJWT ( JWK.fromKeyMaterial $ JWK.ECKeyMaterial $
-                                     JWK.ECKeyParameters { JWK.ecKty = JWK.EC
-                                                         , JWK.ecCrv = JWK.P_256
-                                                         , JWK.ecX = JOSE.SizedBase64Integer 32 $ publicKeyX
-                                                         , JWK.ecY = JOSE.SizedBase64Integer 32 $ publicKeyY
-                                                         , JWK.ecD = Just $ JOSE.SizedBase64Integer 32 $ privateKeyNumber
-                                                         }
-                                )
-                                ( JWSHeader { _jwsHeaderAlg = JOSE.Header.HeaderParam JOSE.Header.Protected ES256
-                                            , _jwsHeaderJku = Nothing
-                                            , _jwsHeaderJwk = Nothing
-                                            , _jwsHeaderKid = Nothing
-                                            , _jwsHeaderX5u = Nothing
-                                            , _jwsHeaderX5c = Nothing
-                                            , _jwsHeaderX5t = Nothing
-                                            , _jwsHeaderX5tS256 = Nothing
-                                            , _jwsHeaderTyp = Just (JOSE.Header.HeaderParam JOSE.Header.Protected "JWT")
-                                            , _jwsHeaderCty = Nothing
-                                            , _jwsHeaderCrit = Nothing
-                                            }
-                                )
-                                ( ClaimsSet { _claimIss = Nothing
-                                            , _claimSub = Just $ vapidSub $ vapidClaims
-                                            , _claimAud = Just $ vapidAud $ vapidClaims
-                                            , _claimExp = Just $ vapidExp $ vapidClaims
-                                            , _claimNbf = Nothing
-                                            , _claimIat = Nothing
-                                            , _claimJti = Nothing
-                                            , _unregisteredClaims = HM.empty
-                                            }
-                                )
+        jwtData <- signClaims ( JWK.fromKeyMaterial $ JWK.ECKeyMaterial $
+                                    JWK.ECKeyParameters { JWK.ecCrv = JWK.P_256
+                                                        , JWK.ecX = JOSE.SizedBase64Integer 32 $ publicKeyX
+                                                        , JWK.ecY = JOSE.SizedBase64Integer 32 $ publicKeyY
+                                                        , JWK.ecD = Just $ JOSE.SizedBase64Integer 32 $ privateKeyNumber
+                                                        }
+                              )
+                              (newJWSHeader ((), ES256))
+                              ( emptyClaimsSet
+                                    & claimSub .~ Just (vapidSub vapidClaims)
+                                    & claimAud .~ Just (vapidAud vapidClaims)
+                                    & claimExp .~ Just (vapidExp vapidClaims)
+                              )
 
-        JOSE.Compact.encodeCompact $ jwtData
+        return $ JOSE.Compact.encodeCompact jwtData
 
             ----------------------------
             {-
