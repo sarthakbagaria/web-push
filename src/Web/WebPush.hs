@@ -223,7 +223,7 @@ data PushNotificationDetails = PushNotificationDetails { endpoint :: Text
 data VAPIDKeysMinDetails = VAPIDKeysMinDetails { privateNumber :: Integer
                                                , publicCoordX :: Integer
                                                , publicCoordY :: Integer
-                                               }
+                                               } deriving (Show)
 
 -- |'RecepientEndpointNotFound' comes up when the endpoint is no longer recognized by the push service.
 -- This may happen if the user has cancelled the push subscription, and hence deleted the endpoint.
