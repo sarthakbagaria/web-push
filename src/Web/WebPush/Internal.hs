@@ -2,6 +2,7 @@
 
 module Web.WebPush.Internal where
 
+import Data.Maybe
 import GHC.Int                                                 (Int64)
 import Data.ByteString                                         (ByteString)
 import qualified Data.ByteString                 as BS
@@ -22,11 +23,10 @@ import Crypto.JWT                                              (signClaims, empt
 import qualified Crypto.JWT                      as JWT
 import qualified Crypto.JOSE.JWK                 as JWK
 import Crypto.JOSE.JWS                                         (newJWSHeader, Alg(ES256))
-import qualified Crypto.JOSE.Types               as JOSE
 import qualified Crypto.JOSE.Compact             as JOSE.Compact
 import qualified Crypto.JOSE.Error               as JOSE.Error
 
-import Data.Aeson                                              (ToJSON, toJSON, (.=))
+import Data.Aeson                                              (ToJSON, toJSON, (.=), decode)
 import qualified Data.Aeson                      as A
 import qualified Data.ByteString.Base64.URL      as B64.URL
 
@@ -34,12 +34,13 @@ import Data.Word                                               (Word8, Word16, W
 import qualified Data.Binary                     as Binary
 import qualified Data.Bits                       as Bits
 import qualified Data.ByteArray                  as ByteArray
+import qualified Data.ByteString.Lazy.Char8      as C
 
 import Control.Monad.IO.Class                                  (MonadIO, liftIO)
 import Control.Monad.Except                                    (runExceptT)
 
-import Control.Lens.Operators                                  ((&), (.~))
-
+import Control.Lens.Operators                                  ((&), (?~))
+import Text.Printf
 
 
 type VAPIDKeys = ECDSA.KeyPair
@@ -49,24 +50,20 @@ data VAPIDClaims = VAPIDClaims { vapidAud :: JWT.Audience
                                , vapidExp :: JWT.NumericDate
                                }
 -- JSON Web Token for VAPID
-webPushJWT :: MonadIO m => VAPIDKeys -> VAPIDClaims -> m (Either (JOSE.Error.Error) LB.ByteString)
+webPushJWT :: MonadIO m => VAPIDKeys -> VAPIDClaims -> m (Either JOSE.Error.Error LB.ByteString)
 webPushJWT vapidKeys vapidClaims = do
     let ECC.Point publicKeyX publicKeyY = ECDSA.public_q $ ECDSA.toPublicKey vapidKeys
         privateKeyNumber = ECDSA.private_d $ ECDSA.toPrivateKey vapidKeys
-
+        materialJsonTempl = "{\"kty\": \"EC\", \"crv\": \"P_256\", \"x\": %d, \"y\": %d, \"d\": %d}"
+        materialJson = (printf materialJsonTempl publicKeyX publicKeyY privateKeyNumber) :: String
+        keyMaterial = fromJust $ decode (C.pack materialJson)
     liftIO $ runExceptT $ do
-        jwtData <- signClaims ( JWK.fromKeyMaterial $ JWK.ECKeyMaterial $
-                                    JWK.ECKeyParameters { JWK.ecCrv = JWK.P_256
-                                                        , JWK.ecX = JOSE.SizedBase64Integer 32 $ publicKeyX
-                                                        , JWK.ecY = JOSE.SizedBase64Integer 32 $ publicKeyY
-                                                        , JWK.ecD = Just $ JOSE.SizedBase64Integer 32 $ privateKeyNumber
-                                                        }
-                              )
+        jwtData <- signClaims (JWK.fromKeyMaterial keyMaterial)
                               (newJWSHeader ((), ES256))
-                              ( emptyClaimsSet
-                                    & claimSub .~ Just (vapidSub vapidClaims)
-                                    & claimAud .~ Just (vapidAud vapidClaims)
-                                    & claimExp .~ Just (vapidExp vapidClaims)
+                              (emptyClaimsSet
+                                    & claimSub ?~ vapidSub vapidClaims
+                                    & claimAud ?~ vapidAud vapidClaims
+                                    & claimExp ?~ vapidExp vapidClaims
                               )
 
         return $ JOSE.Compact.encodeCompact jwtData
