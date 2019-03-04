@@ -58,7 +58,7 @@ webPushJWT vapidKeys vapidClaims = do
         ecX = JOSE.SizedBase64Integer 32 $ publicKeyX
         ecY = JOSE.SizedBase64Integer 32 $ publicKeyY
         ecD = JOSE.SizedBase64Integer 32 $ privateKeyNumber
-        materialJsonTempl = "{\"kty\": \"EC\", \"crv\": \"P-256\", \"x\": \"%s\", \"y\": \"%s\", \"d\": \"%s\"}"
+        materialJsonTempl = "{\"kty\": \"EC\", \"crv\": \"P-256\", \"x\": %s, \"y\": %s, \"d\": %s}"
         materialJson = (printf materialJsonTempl (C.unpack $ encode ecX) (C.unpack $ encode ecY) (C.unpack $ encode ecD)) :: String
     liftIO $ print materialJson
     liftIO $ print (eitherDecode (C.pack materialJson) :: Either String JWK.KeyMaterial)
