@@ -27,7 +27,7 @@ import qualified Crypto.JOSE.Compact             as JOSE.Compact
 import qualified Crypto.JOSE.Error               as JOSE.Error
 import qualified Crypto.JOSE.Types               as JOSE
 
-import Data.Aeson                                              (ToJSON, toJSON, (.=), decode, eitherDecode)
+import Data.Aeson                                              (ToJSON, toJSON, (.=), decode, eitherDecode, encode)
 import qualified Data.Aeson                      as A
 import qualified Data.ByteString.Base64.URL      as B64.URL
 
@@ -57,9 +57,9 @@ webPushJWT vapidKeys vapidClaims = do
         privateKeyNumber = ECDSA.private_d $ ECDSA.toPrivateKey vapidKeys
         ecX = JOSE.SizedBase64Integer 32 $ publicKeyX
         ecY = JOSE.SizedBase64Integer 32 $ publicKeyY
-        ecD = Just $ JOSE.SizedBase64Integer 32 $ privateKeyNumber
+        ecD = JOSE.SizedBase64Integer 32 $ privateKeyNumber
         materialJsonTempl = "{\"kty\": \"EC\", \"crv\": \"P-256\", \"x\": \"%s\", \"y\": \"%s\", \"d\": \"%s\"}"
-        materialJson = (printf materialJsonTempl (show ecX) (show ecY) (show ecD)) :: String
+        materialJson = (printf materialJsonTempl (C.unpack $ encode ecX) (C.unpack $ encode ecY) (C.unpack $ encode ecD)) :: String
     liftIO $ print materialJson
     liftIO $ print (eitherDecode (C.pack materialJson) :: Either String JWK.KeyMaterial)
     let keyMaterial = fromJust $ decode (C.pack materialJson)
