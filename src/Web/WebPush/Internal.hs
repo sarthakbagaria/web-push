@@ -54,7 +54,7 @@ webPushJWT :: MonadIO m => VAPIDKeys -> VAPIDClaims -> m (Either JOSE.Error.Erro
 webPushJWT vapidKeys vapidClaims = do
     let ECC.Point publicKeyX publicKeyY = ECDSA.public_q $ ECDSA.toPublicKey vapidKeys
         privateKeyNumber = ECDSA.private_d $ ECDSA.toPrivateKey vapidKeys
-        materialJsonTempl = "{\"kty\": \"EC\", \"crv\": \"P_256\", \"x\": %d, \"y\": %d, \"d\": %d}"
+        materialJsonTempl = "{\"kty\": \"EC\", \"crv\": \"P-256\", \"x\": %d, \"y\": %d, \"d\": %d}"
         materialJson = (printf materialJsonTempl publicKeyX publicKeyY privateKeyNumber) :: String
         keyMaterial = fromJust $ decode (C.pack materialJson)
     liftIO $ runExceptT $ do
