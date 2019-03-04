@@ -26,7 +26,7 @@ import Crypto.JOSE.JWS                                         (newJWSHeader, Al
 import qualified Crypto.JOSE.Compact             as JOSE.Compact
 import qualified Crypto.JOSE.Error               as JOSE.Error
 
-import Data.Aeson                                              (ToJSON, toJSON, (.=), decode)
+import Data.Aeson                                              (ToJSON, toJSON, (.=), decode, eitherDecode)
 import qualified Data.Aeson                      as A
 import qualified Data.ByteString.Base64.URL      as B64.URL
 
@@ -56,7 +56,9 @@ webPushJWT vapidKeys vapidClaims = do
         privateKeyNumber = ECDSA.private_d $ ECDSA.toPrivateKey vapidKeys
         materialJsonTempl = "{\"kty\": \"EC\", \"crv\": \"P-256\", \"x\": %d, \"y\": %d, \"d\": %d}"
         materialJson = (printf materialJsonTempl publicKeyX publicKeyY privateKeyNumber) :: String
-        keyMaterial = fromJust $ decode (C.pack materialJson)
+    liftIO $ print materialJsonTempl
+    liftIO $ print (eitherDecode (C.pack materialJson) :: Either String JWK.KeyMaterial)
+    let keyMaterial = fromJust $ decode (C.pack materialJson)
     liftIO $ runExceptT $ do
         jwtData <- signClaims (JWK.fromKeyMaterial keyMaterial)
                               (newJWSHeader ((), ES256))
