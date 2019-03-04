@@ -25,6 +25,7 @@ import qualified Crypto.JOSE.JWK                 as JWK
 import Crypto.JOSE.JWS                                         (newJWSHeader, Alg(ES256))
 import qualified Crypto.JOSE.Compact             as JOSE.Compact
 import qualified Crypto.JOSE.Error               as JOSE.Error
+import qualified Crypto.JOSE.Types               as JOSE
 
 import Data.Aeson                                              (ToJSON, toJSON, (.=), decode, eitherDecode)
 import qualified Data.Aeson                      as A
@@ -54,9 +55,12 @@ webPushJWT :: MonadIO m => VAPIDKeys -> VAPIDClaims -> m (Either JOSE.Error.Erro
 webPushJWT vapidKeys vapidClaims = do
     let ECC.Point publicKeyX publicKeyY = ECDSA.public_q $ ECDSA.toPublicKey vapidKeys
         privateKeyNumber = ECDSA.private_d $ ECDSA.toPrivateKey vapidKeys
-        materialJsonTempl = "{\"kty\": \"EC\", \"crv\": \"P-256\", \"x\": %d, \"y\": %d, \"d\": %d}"
-        materialJson = (printf materialJsonTempl publicKeyX publicKeyY privateKeyNumber) :: String
-    liftIO $ print materialJsonTempl
+        ecX = JOSE.SizedBase64Integer 32 $ publicKeyX
+        ecY = JOSE.SizedBase64Integer 32 $ publicKeyY
+        ecD = Just $ JOSE.SizedBase64Integer 32 $ privateKeyNumber
+        materialJsonTempl = "{\"kty\": \"EC\", \"crv\": \"P-256\", \"x\": \"%s\", \"y\": \"%s\", \"d\": \"%s\"}"
+        materialJson = (printf materialJsonTempl (show ecX) (show ecY) (show ecD)) :: String
+    liftIO $ print materialJson
     liftIO $ print (eitherDecode (C.pack materialJson) :: Either String JWK.KeyMaterial)
     let keyMaterial = fromJust $ decode (C.pack materialJson)
     liftIO $ runExceptT $ do
