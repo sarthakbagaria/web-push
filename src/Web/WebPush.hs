@@ -191,7 +191,9 @@ sendPushNotification vapidKeys httpManager pushNotification = do
                                         -- when the endpoint is invalid, we need to remove it from database
                                         |(statusCode (responseStatus resp) == 404) -> return $ Left RecepientEndpointNotFound
                                     _ -> return $ Left $ PushRequestFailed err
-                                Right _ -> return $ Right ()
+                                Right resp -> do
+                                    liftIO $ print resp
+                                    return $ Right ()
 
     where
 
