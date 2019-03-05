@@ -12,23 +12,15 @@ import Data.Time.Format
 import Data.Time
 import qualified Crypto.PubKey.ECC.Types         as ECC
 import qualified Crypto.PubKey.ECC.ECDSA         as ECDSA
-import Crypto.Hash.Algorithms                                  (SHA256(..))
 import qualified Crypto.PubKey.ECC.DH            as ECDH
 import qualified Crypto.MAC.HMAC                 as HMAC
-import Crypto.Cipher.AES                                       (AES128)
 import qualified Crypto.Cipher.Types             as Cipher
+import Crypto.Hash.Algorithms                                  (SHA256(..))
+import Crypto.Cipher.AES                                       (AES128)
 import Crypto.Error                                            (CryptoFailable(CryptoPassed,CryptoFailed), CryptoError)
 import Network.HTTP.Client                                     (Request, host, secure)
 
--- import Crypto.JWT                                              (signClaims, emptyClaimsSet, claimSub, claimAud, claimExp)
--- import qualified Crypto.JWT                      as JWT
--- import qualified Crypto.JOSE.JWK                 as JWK
--- import Crypto.JOSE.JWS                                         (newJWSHeader, Alg(ES256))
--- import qualified Crypto.JOSE.Compact             as JOSE.Compact
--- import qualified Crypto.JOSE.Error               as JOSE.Error
--- import qualified Crypto.JOSE.Types               as JOSE
-
-import Data.Aeson                                              (ToJSON, toJSON, (.=))
+import Data.Aeson                                              ((.=))
 import qualified Data.Aeson                      as A
 import qualified Data.ByteString.Base64.URL      as B64.URL
 
@@ -81,26 +73,7 @@ webPushJWT vapidKeys initReq senderEmail = do
 
     let res = messageForJWTSignature <> "." <> encodedJWTSignature
     pure . Right . LB.fromStrict $ res
-            
-            ----------------------------
 
-
-
-data PushNotificationMessage = PushNotificationMessage { title :: Text
-                                                       , body :: Text
-                                                       , icon :: Text
-                                                       , url :: Text
-                                                       , tag :: Text
-                                                       }
-
-instance ToJSON PushNotificationMessage where
-   toJSON PushNotificationMessage {..} = A.object
-       [ "title" .= title
-       , "body" .= body
-       , "icon" .= icon
-       , "url" .= url
-       , "tag" .= tag
-       ]
 
 -- All inputs are in raw bytes with no encoding
 -- except for the plaintext for which raw bytes are the Base 64 encoded bytes
