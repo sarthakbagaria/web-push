@@ -24,9 +24,6 @@ import qualified Crypto.PubKey.ECC.Generate      as ECC
 import qualified Crypto.PubKey.ECC.ECDSA         as ECDSA
 import qualified Crypto.PubKey.ECC.DH            as ECDH
 
-import Crypto.JWT                                              (NumericDate(..))
-import qualified Crypto.JWT                      as JWT
-
 import qualified Data.Bits                       as Bits
 import Data.Word                                               (Word8)
 
@@ -35,21 +32,14 @@ import qualified Data.List                       as L
 import Data.Text                                               (Text)
 import qualified Data.Text                       as T
 import qualified Data.Text.Encoding              as TE
-import qualified Data.Text.Encoding.Error        as TE
-import Data.String                                             (IsString(fromString))
-import Data.Monoid                                             ((<>))
 import qualified Data.ByteString.Lazy            as LB
 import qualified Data.ByteString                 as BS
 import qualified Data.ByteString.Char8           as C8
 import qualified Data.Aeson                      as A
 import qualified Data.ByteString.Base64.URL      as B64.URL
-import qualified Data.ByteString.Base64.URL.Lazy as B64.URL.Lazy
 
 
-import Data.Time.Clock                                         (getCurrentTime)
-import Data.Time                                               (addUTCTime)
-
-import Network.HTTP.Client                                     (Manager, httpLbs, parseRequest, HttpException(HttpExceptionRequest), HttpExceptionContent(StatusCodeException), RequestBody(..), requestBody, requestHeaders, method, host, secure, responseStatus)
+import Network.HTTP.Client                                     (Manager, httpLbs, parseRequest, HttpException(HttpExceptionRequest), HttpExceptionContent(StatusCodeException), RequestBody(..), requestBody, requestHeaders, method, responseStatus)
 import Network.HTTP.Types                                      (hContentType, hAuthorization, hContentEncoding)
 import Network.HTTP.Types.Status                               (Status(statusCode))
 
@@ -123,13 +113,7 @@ sendPushNotification vapidKeys httpManager pushNotification = do
     case eitherInitReq of
         Left exc@(SomeException _) -> return $ Left $ EndpointParseFailed exc
         Right initReq -> do
-            time <- liftIO $ getCurrentTime
-            eitherJwt <- webPushJWT vapidKeys (VAPIDClaims { vapidAud =  JWT.Audience [ fromString $ T.unpack $ TE.decodeUtf8With TE.lenientDecode $
-                                                                                             BS.append (if secure initReq then "https://" else "http://") (host initReq)
-                                                                                       ]
-                                                            , vapidSub = fromString $ T.unpack $ T.append "mailto:" $ senderEmail pushNotification
-                                                            , vapidExp = NumericDate $ addUTCTime 3000 time
-                                                            }) initReq (T.unpack $ senderEmail pushNotification)
+            eitherJwt <- webPushJWT vapidKeys initReq (senderEmail pushNotification)
             case eitherJwt of
                 Left err -> return $ Left $ JWTGenerationFailed err
                 Right jwt -> do

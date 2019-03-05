@@ -2,7 +2,6 @@
 
 module Web.WebPush.Internal where
 
-import Data.Maybe
 import GHC.Int                                                 (Int64)
 import Data.ByteString                                         (ByteString)
 import qualified Data.ByteString                 as BS
@@ -11,7 +10,6 @@ import Data.Monoid                                             ((<>))
 import Data.Text                                               (Text)
 import Data.Time.Format
 import Data.Time
-import Network.HTTP.Client
 import qualified Crypto.PubKey.ECC.Types         as ECC
 import qualified Crypto.PubKey.ECC.ECDSA         as ECDSA
 import Crypto.Hash.Algorithms                                  (SHA256(..))
@@ -20,16 +18,17 @@ import qualified Crypto.MAC.HMAC                 as HMAC
 import Crypto.Cipher.AES                                       (AES128)
 import qualified Crypto.Cipher.Types             as Cipher
 import Crypto.Error                                            (CryptoFailable(CryptoPassed,CryptoFailed), CryptoError)
+import Network.HTTP.Client                                     (Request, host, secure)
 
-import Crypto.JWT                                              (signClaims, emptyClaimsSet, claimSub, claimAud, claimExp)
-import qualified Crypto.JWT                      as JWT
-import qualified Crypto.JOSE.JWK                 as JWK
-import Crypto.JOSE.JWS                                         (newJWSHeader, Alg(ES256))
-import qualified Crypto.JOSE.Compact             as JOSE.Compact
-import qualified Crypto.JOSE.Error               as JOSE.Error
-import qualified Crypto.JOSE.Types               as JOSE
+-- import Crypto.JWT                                              (signClaims, emptyClaimsSet, claimSub, claimAud, claimExp)
+-- import qualified Crypto.JWT                      as JWT
+-- import qualified Crypto.JOSE.JWK                 as JWK
+-- import Crypto.JOSE.JWS                                         (newJWSHeader, Alg(ES256))
+-- import qualified Crypto.JOSE.Compact             as JOSE.Compact
+-- import qualified Crypto.JOSE.Error               as JOSE.Error
+-- import qualified Crypto.JOSE.Types               as JOSE
 
-import Data.Aeson                                              (ToJSON, toJSON, (.=), decode, eitherDecode, encode)
+import Data.Aeson                                              (ToJSON, toJSON, (.=))
 import qualified Data.Aeson                      as A
 import qualified Data.ByteString.Base64.URL      as B64.URL
 
@@ -37,66 +36,34 @@ import Data.Word                                               (Word8, Word16, W
 import qualified Data.Binary                     as Binary
 import qualified Data.Bits                       as Bits
 import qualified Data.ByteArray                  as ByteArray
-import qualified Data.ByteString.Lazy.Char8      as C
 
 import Control.Monad.IO.Class                                  (MonadIO, liftIO)
-import Control.Monad.Except                                    (runExceptT)
-
-import Control.Lens.Operators                                  ((&), (?~))
-import Text.Printf
-import qualified Data.Text.Encoding as TE
-import qualified Data.Text.Encoding.Error as TE
+import qualified Data.Text.Encoding              as TE
+import qualified Data.Text.Encoding.Error        as TE
+import qualified Data.Text                       as T
 
 type VAPIDKeys = ECDSA.KeyPair
 
-data VAPIDClaims = VAPIDClaims { vapidAud :: JWT.Audience
-                               , vapidSub :: JWT.StringOrURI
-                               , vapidExp :: JWT.NumericDate
-                               }
--- JSON Web Token for VAPID
--- webPushJWT :: MonadIO m => VAPIDKeys -> VAPIDClaims -> m (Either JOSE.Error.Error LB.ByteString)
-webPushJWT :: MonadIO m => ECDSA.KeyPair -> p -> Request -> [Char] -> m (Either a LB.ByteString)
-webPushJWT vapidKeys vapidClaims initReq senderEmail = do
-    -- let ECC.Point publicKeyX publicKeyY = ECDSA.public_q $ ECDSA.toPublicKey vapidKeys
-        -- privateKeyNumber = ECDSA.private_d $ ECDSA.toPrivateKey vapidKeys
-    --     ecX = JOSE.SizedBase64Integer 32 $ publicKeyX
-    --     ecY = JOSE.SizedBase64Integer 32 $ publicKeyY
-    --     ecD = JOSE.SizedBase64Integer 32 $ privateKeyNumber
-    --     materialJsonTempl = "{\"kty\": \"EC\", \"crv\": \"P-256\", \"x\": %s, \"y\": %s, \"d\": %s}"
-    --     materialJson = (printf materialJsonTempl (C.unpack $ encode ecX) (C.unpack $ encode ecY) (C.unpack $ encode ecD)) :: String
-    -- liftIO $ print materialJson
-    -- liftIO $ print (eitherDecode (C.pack materialJson) :: Either String JWK.KeyMaterial)
-    -- let keyMaterial = fromJust $ decode (C.pack materialJson)
-    -- liftIO $ runExceptT $ do
-    --     jwtData <- signClaims (JWK.fromKeyMaterial keyMaterial)
-    --                           (newJWSHeader ((), ES256))
-    --                           (emptyClaimsSet
-    --                                 & claimSub ?~ vapidSub vapidClaims
-    --                                 & claimAud ?~ vapidAud vapidClaims
-    --                                 & claimExp ?~ vapidExp vapidClaims
-    --                           )
-
-    --     return $ JOSE.Compact.encodeCompact jwtData
-
-            ----------------------------
-            
-            -- Manual implementation without using the JWT libraries.
-            -- This works as well.
-            -- Kept here mainly as process explanation.
-
-            -- JWT base 64 encoding is without padding
+----------------------------
+-- Manual implementation without using the JWT libraries.
+-- This works as well.
+-- Kept here mainly as process explanation.
+webPushJWT :: MonadIO m => VAPIDKeys -> Request -> T.Text -> m (Either a LB.ByteString)
+webPushJWT vapidKeys initReq senderEmail = do
+    -- JWT base 64 encoding is without padding
     time <- liftIO getCurrentTime
     let messageForJWTSignature =
             let proto = if secure initReq then "https://" else "http://"
-                encodedJWTPayload = b64UrlNoPadding $ LB.toStrict $ A.encode $ A.object $
+                encodedJWTPayload = b64UrlNoPadding . LB.toStrict . A.encode . A.object $
                     [ "aud" .= (TE.decodeUtf8With TE.lenientDecode $ proto <> (host initReq))
-                    -- jwt expiration time
-                    , "exp" .= (formatTime defaultTimeLocale "%s" $ addUTCTime 3000 time)
-                    , "sub" .= ("mailto: " ++ senderEmail)
+                    , "exp" .= (formatTime defaultTimeLocale "%s" $ addUTCTime 3000 time) -- jwt expiration time
+                    , "sub" .= ("mailto: " <> senderEmail)
                     ]
 
-                encodedJWTHeader = b64UrlNoPadding $ LB.toStrict $ A.encode $ A.object $
-                    [ "typ" .= ("JWT" :: Text), "alg" .= ("ES256" :: Text) ]
+                encodedJWTHeader = b64UrlNoPadding . LB.toStrict . A.encode . A.object $
+                    [ "typ" .= ("JWT" :: Text)
+                    , "alg" .= ("ES256" :: Text)
+                    ]
 
             in encodedJWTHeader <> "." <> encodedJWTPayload
 
