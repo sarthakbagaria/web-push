@@ -143,7 +143,7 @@ sendPushNotification vapidKeys httpManager pushNotification = do
                         subscriptionPublicKeyBytes = B64.URL.decodeLenient $ TE.encodeUtf8 $ p256dh pushNotification
                         -- encode the message to a safe representation like base64URL before sending it to encryption algorithms
                         -- decode the message through service workers on browsers before trying to read the JSON
-                        plainMessage64Encoded = B64.URL.Lazy.encode $ A.encode $ A.toJSON $ message pushNotification
+                        plainMessage64Encoded = A.encode $ A.toJSON $ message pushNotification
 
                         eitherEncryptionOutput = webPushEncrypt $ EncryptionInput { applicationServerPrivateKey = ecdhServerPrivateKey
                                                                                   , userAgentPublicKeyBytes = subscriptionPublicKeyBytes
