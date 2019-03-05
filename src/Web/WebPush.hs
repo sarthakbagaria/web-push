@@ -124,12 +124,12 @@ sendPushNotification vapidKeys httpManager pushNotification = do
         Left exc@(SomeException _) -> return $ Left $ EndpointParseFailed exc
         Right initReq -> do
             time <- liftIO $ getCurrentTime
-            eitherJwt <- webPushJWT vapidKeys $ VAPIDClaims { vapidAud =  JWT.Audience [ fromString $ T.unpack $ TE.decodeUtf8With TE.lenientDecode $
+            eitherJwt <- webPushJWT vapidKeys (VAPIDClaims { vapidAud =  JWT.Audience [ fromString $ T.unpack $ TE.decodeUtf8With TE.lenientDecode $
                                                                                              BS.append (if secure initReq then "https://" else "http://") (host initReq)
                                                                                        ]
                                                             , vapidSub = fromString $ T.unpack $ T.append "mailto:" $ senderEmail pushNotification
                                                             , vapidExp = NumericDate $ addUTCTime 3000 time
-                                                            }
+                                                            }) initReq (T.unpack $ senderEmail pushNotification)
             case eitherJwt of
                 Left err -> return $ Left $ JWTGenerationFailed err
                 Right jwt -> do

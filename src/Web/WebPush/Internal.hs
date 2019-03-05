@@ -9,7 +9,9 @@ import qualified Data.ByteString                 as BS
 import qualified Data.ByteString.Lazy            as LB
 import Data.Monoid                                             ((<>))
 import Data.Text                                               (Text)
-
+import Data.Time.Format
+import Data.Time
+import Network.HTTP.Client
 import qualified Crypto.PubKey.ECC.Types         as ECC
 import qualified Crypto.PubKey.ECC.ECDSA         as ECDSA
 import Crypto.Hash.Algorithms                                  (SHA256(..))
@@ -42,7 +44,8 @@ import Control.Monad.Except                                    (runExceptT)
 
 import Control.Lens.Operators                                  ((&), (?~))
 import Text.Printf
-
+import qualified Data.Text.Encoding as TE
+import qualified Data.Text.Encoding.Error as TE
 
 type VAPIDKeys = ECDSA.KeyPair
 
@@ -51,64 +54,67 @@ data VAPIDClaims = VAPIDClaims { vapidAud :: JWT.Audience
                                , vapidExp :: JWT.NumericDate
                                }
 -- JSON Web Token for VAPID
-webPushJWT :: MonadIO m => VAPIDKeys -> VAPIDClaims -> m (Either JOSE.Error.Error LB.ByteString)
-webPushJWT vapidKeys vapidClaims = do
-    let ECC.Point publicKeyX publicKeyY = ECDSA.public_q $ ECDSA.toPublicKey vapidKeys
-        privateKeyNumber = ECDSA.private_d $ ECDSA.toPrivateKey vapidKeys
-        ecX = JOSE.SizedBase64Integer 32 $ publicKeyX
-        ecY = JOSE.SizedBase64Integer 32 $ publicKeyY
-        ecD = JOSE.SizedBase64Integer 32 $ privateKeyNumber
-        materialJsonTempl = "{\"kty\": \"EC\", \"crv\": \"P-256\", \"x\": %s, \"y\": %s, \"d\": %s}"
-        materialJson = (printf materialJsonTempl (C.unpack $ encode ecX) (C.unpack $ encode ecY) (C.unpack $ encode ecD)) :: String
-    liftIO $ print materialJson
-    liftIO $ print (eitherDecode (C.pack materialJson) :: Either String JWK.KeyMaterial)
-    let keyMaterial = fromJust $ decode (C.pack materialJson)
-    liftIO $ runExceptT $ do
-        jwtData <- signClaims (JWK.fromKeyMaterial keyMaterial)
-                              (newJWSHeader ((), ES256))
-                              (emptyClaimsSet
-                                    & claimSub ?~ vapidSub vapidClaims
-                                    & claimAud ?~ vapidAud vapidClaims
-                                    & claimExp ?~ vapidExp vapidClaims
-                              )
+-- webPushJWT :: MonadIO m => VAPIDKeys -> VAPIDClaims -> m (Either JOSE.Error.Error LB.ByteString)
+webPushJWT :: MonadIO m => ECDSA.KeyPair -> p -> Request -> [Char] -> m (Either a LB.ByteString)
+webPushJWT vapidKeys vapidClaims initReq senderEmail = do
+    -- let ECC.Point publicKeyX publicKeyY = ECDSA.public_q $ ECDSA.toPublicKey vapidKeys
+        -- privateKeyNumber = ECDSA.private_d $ ECDSA.toPrivateKey vapidKeys
+    --     ecX = JOSE.SizedBase64Integer 32 $ publicKeyX
+    --     ecY = JOSE.SizedBase64Integer 32 $ publicKeyY
+    --     ecD = JOSE.SizedBase64Integer 32 $ privateKeyNumber
+    --     materialJsonTempl = "{\"kty\": \"EC\", \"crv\": \"P-256\", \"x\": %s, \"y\": %s, \"d\": %s}"
+    --     materialJson = (printf materialJsonTempl (C.unpack $ encode ecX) (C.unpack $ encode ecY) (C.unpack $ encode ecD)) :: String
+    -- liftIO $ print materialJson
+    -- liftIO $ print (eitherDecode (C.pack materialJson) :: Either String JWK.KeyMaterial)
+    -- let keyMaterial = fromJust $ decode (C.pack materialJson)
+    -- liftIO $ runExceptT $ do
+    --     jwtData <- signClaims (JWK.fromKeyMaterial keyMaterial)
+    --                           (newJWSHeader ((), ES256))
+    --                           (emptyClaimsSet
+    --                                 & claimSub ?~ vapidSub vapidClaims
+    --                                 & claimAud ?~ vapidAud vapidClaims
+    --                                 & claimExp ?~ vapidExp vapidClaims
+    --                           )
 
-        return $ JOSE.Compact.encodeCompact jwtData
+    --     return $ JOSE.Compact.encodeCompact jwtData
 
             ----------------------------
-            {-
+            
             -- Manual implementation without using the JWT libraries.
             -- This works as well.
             -- Kept here mainly as process explanation.
 
             -- JWT base 64 encoding is without padding
-            let messageForJWTSignature = let encodedJWTPayload = b64UrlNoPadding $ LB.toStrict $ A.encode $ A.object $
-                                                 [ "aud" .= (TE.decodeUtf8With TE.lenientDecode $
-                                                                (if secure initReq then "https://" else "http://") ++ (host initReq)
-                                                            )
-                                                 -- jwt expiration time
-                                                 , "exp" .= (formatTime defaultTimeLocale "%s" $ addUTCTime 3000 time)
-                                                 , "sub" .= ("mailto: " ++ (senderEmail pushNotification))
-                                                 ]
+    time <- liftIO getCurrentTime
+    let messageForJWTSignature =
+            let proto = if secure initReq then "https://" else "http://"
+                encodedJWTPayload = b64UrlNoPadding $ LB.toStrict $ A.encode $ A.object $
+                    [ "aud" .= (TE.decodeUtf8With TE.lenientDecode $ proto <> (host initReq))
+                    -- jwt expiration time
+                    , "exp" .= (formatTime defaultTimeLocale "%s" $ addUTCTime 3000 time)
+                    , "sub" .= ("mailto: " ++ senderEmail)
+                    ]
 
-                                             encodedJWTHeader = b64UrlNoPadding $ LB.toStrict $ A.encode $ A.object $
-                                                 [ "typ" .= ("JWT" :: Text), "alg" .= ("ES256" :: Text) ]
+                encodedJWTHeader = b64UrlNoPadding $ LB.toStrict $ A.encode $ A.object $
+                    [ "typ" .= ("JWT" :: Text), "alg" .= ("ES256" :: Text) ]
 
-                                         in encodedJWTHeader <> "." <> encodedJWTPayload
+            in encodedJWTHeader <> "." <> encodedJWTPayload
 
-            -- JWT only accepts SHA256 hash with ECDSA for ES256 signed token
-            encodedJWTSignature <- do
-                -- ECDSA signing vulnerable to timing attacks
-                ECDSA.Signature signR signS <- liftIO $ ECDSA.sign (ECDSA.toPrivateKey vapidKeys)
-                                                                   SHA256
-                                                                   messageForJWTSignature
+    -- JWT only accepts SHA256 hash with ECDSA for ES256 signed token
+    encodedJWTSignature <- do
+        -- ECDSA signing vulnerable to timing attacks
+        ECDSA.Signature signR signS <- liftIO $ ECDSA.sign (ECDSA.toPrivateKey vapidKeys)
+                                                            SHA256
+                                                            messageForJWTSignature
 
-                -- 32 bytes of R followed by 32 bytes of S
-                return $ b64UrlNoPadding $ LB.toStrict $
-                             (Binary.encode $ int32Bytes signR) <>
-                             (Binary.encode $ int32Bytes signS)
+        -- 32 bytes of R followed by 32 bytes of S
+        return $ b64UrlNoPadding $ LB.toStrict $
+                        (Binary.encode $ int32Bytes signR) <>
+                        (Binary.encode $ int32Bytes signS)
 
-            return $ Right $ messageForJWTSignature <> "." <> encodedJWTSignature
-            -}
+    let res = messageForJWTSignature <> "." <> encodedJWTSignature
+    pure . Right . LB.fromStrict $ res
+            
             ----------------------------
 
 
