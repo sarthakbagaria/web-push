@@ -40,7 +40,7 @@ type VAPIDKeys = ECDSA.KeyPair
 -- Manual implementation without using the JWT libraries.
 -- This works as well.
 -- Kept here mainly as process explanation.
-webPushJWT :: MonadIO m => VAPIDKeys -> Request -> T.Text -> m (Either a LB.ByteString)
+webPushJWT :: MonadIO m => VAPIDKeys -> Request -> T.Text -> m LB.ByteString
 webPushJWT vapidKeys initReq senderEmail = do
     -- JWT base 64 encoding is without padding
     time <- liftIO getCurrentTime
@@ -72,7 +72,7 @@ webPushJWT vapidKeys initReq senderEmail = do
                         (Binary.encode $ int32Bytes signS)
 
     let res = messageForJWTSignature <> "." <> encodedJWTSignature
-    pure . Right . LB.fromStrict $ res
+    pure . LB.fromStrict $ res
 
 
 -- All inputs are in raw bytes with no encoding

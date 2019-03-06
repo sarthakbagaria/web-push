@@ -50,7 +50,6 @@ import Network.HTTP.Client                                     (Manager, httpLbs
 import Network.HTTP.Types                                      (hContentType, hAuthorization, hContentEncoding)
 import Network.HTTP.Types.Status                               (Status(statusCode))
 
-import qualified Crypto.JOSE.Error               as JOSE.Error
 import Crypto.Error                                            (CryptoError)
 
 import Control.Exception.Base                                  (SomeException(..), fromException)
@@ -120,8 +119,7 @@ sendPushNotification vapidKeys httpManager pushNotification = do
     eitherInitReq <- runCatchT . parseRequest . T.unpack $ pushNotification ^. pushEndpoint
     result <- runExceptT $ do
         initReq <- either (throwError . EndpointParseFailed) pure eitherInitReq
-        eitherJwt <- webPushJWT vapidKeys initReq (pushNotification ^. pushSenderEmail)
-        jwt <- either (throwError . JWTGenerationFailed) pure eitherJwt
+        jwt <- webPushJWT vapidKeys initReq (pushNotification ^. pushSenderEmail)
         ecdhServerPrivateKey <- liftIO $ ECDH.generatePrivate $ ECC.getCurveByName ECC.SEC_p256r1
         randSalt <- liftIO $ getRandomBytes 16
         padLen <- liftIO $ randomRIO (0, 20)
@@ -235,7 +233,6 @@ data VAPIDKeysMinDetails = VAPIDKeysMinDetails { privateNumber :: Integer
 -- This may happen if the user has cancelled the push subscription, and hence deleted the endpoint.
 -- You may want to delete the endpoint from database in this case.
 data PushNotificationError = EndpointParseFailed SomeException
-                           | JWTGenerationFailed JOSE.Error.Error
                            | MessageEncryptionFailed CryptoError
                            | RecepientEndpointNotFound
                            | PushRequestFailed SomeException
