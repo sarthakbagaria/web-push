@@ -8,25 +8,19 @@ import qualified Data.ByteString                 as BS
 import qualified Data.ByteString.Lazy            as LB
 import Data.Monoid                                             ((<>))
 import Data.Text                                               (Text)
-
+import Data.Time.Format
+import Data.Time
 import qualified Crypto.PubKey.ECC.Types         as ECC
 import qualified Crypto.PubKey.ECC.ECDSA         as ECDSA
-import Crypto.Hash.Algorithms                                  (SHA256(..))
 import qualified Crypto.PubKey.ECC.DH            as ECDH
 import qualified Crypto.MAC.HMAC                 as HMAC
-import Crypto.Cipher.AES                                       (AES128)
 import qualified Crypto.Cipher.Types             as Cipher
+import Crypto.Hash.Algorithms                                  (SHA256(..))
+import Crypto.Cipher.AES                                       (AES128)
 import Crypto.Error                                            (CryptoFailable(CryptoPassed,CryptoFailed), CryptoError)
+import Network.HTTP.Client                                     (Request, host, secure)
 
-import Crypto.JWT                                              (signClaims, emptyClaimsSet, claimSub, claimAud, claimExp)
-import qualified Crypto.JWT                      as JWT
-import qualified Crypto.JOSE.JWK                 as JWK
-import Crypto.JOSE.JWS                                         (newJWSHeader, Alg(ES256))
-import qualified Crypto.JOSE.Types               as JOSE
-import qualified Crypto.JOSE.Compact             as JOSE.Compact
-import qualified Crypto.JOSE.Error               as JOSE.Error
-
-import Data.Aeson                                              (ToJSON, toJSON, (.=))
+import Data.Aeson                                              ((.=))
 import qualified Data.Aeson                      as A
 import qualified Data.ByteString.Base64.URL      as B64.URL
 
@@ -36,95 +30,50 @@ import qualified Data.Bits                       as Bits
 import qualified Data.ByteArray                  as ByteArray
 
 import Control.Monad.IO.Class                                  (MonadIO, liftIO)
-import Control.Monad.Except                                    (runExceptT)
-
-import Control.Lens.Operators                                  ((&), (.~))
-
-
+import qualified Data.Text.Encoding              as TE
+import qualified Data.Text.Encoding.Error        as TE
+import qualified Data.Text                       as T
 
 type VAPIDKeys = ECDSA.KeyPair
 
-data VAPIDClaims = VAPIDClaims { vapidAud :: JWT.Audience
-                               , vapidSub :: JWT.StringOrURI
-                               , vapidExp :: JWT.NumericDate
-                               }
--- JSON Web Token for VAPID
-webPushJWT :: MonadIO m => VAPIDKeys -> VAPIDClaims -> m (Either (JOSE.Error.Error) LB.ByteString)
-webPushJWT vapidKeys vapidClaims = do
-    let ECC.Point publicKeyX publicKeyY = ECDSA.public_q $ ECDSA.toPublicKey vapidKeys
-        privateKeyNumber = ECDSA.private_d $ ECDSA.toPrivateKey vapidKeys
+----------------------------
+-- Manual implementation without using the JWT libraries.
+-- This works as well.
+-- Kept here mainly as process explanation.
+webPushJWT :: MonadIO m => VAPIDKeys -> Request -> T.Text -> m LB.ByteString
+webPushJWT vapidKeys initReq senderEmail = do
+    -- JWT base 64 encoding is without padding
+    time <- liftIO getCurrentTime
+    let messageForJWTSignature =
+            let proto = if secure initReq then "https://" else "http://"
+                encodedJWTPayload = b64UrlNoPadding . LB.toStrict . A.encode . A.object $
+                    [ "aud" .= (TE.decodeUtf8With TE.lenientDecode $ proto <> (host initReq))
+                    , "exp" .= (formatTime defaultTimeLocale "%s" $ addUTCTime 3000 time) -- jwt expiration time
+                    , "sub" .= ("mailto: " <> senderEmail)
+                    ]
 
-    liftIO $ runExceptT $ do
-        jwtData <- signClaims ( JWK.fromKeyMaterial $ JWK.ECKeyMaterial $
-                                    JWK.ECKeyParameters { JWK.ecCrv = JWK.P_256
-                                                        , JWK.ecX = JOSE.SizedBase64Integer 32 $ publicKeyX
-                                                        , JWK.ecY = JOSE.SizedBase64Integer 32 $ publicKeyY
-                                                        , JWK.ecD = Just $ JOSE.SizedBase64Integer 32 $ privateKeyNumber
-                                                        }
-                              )
-                              (newJWSHeader ((), ES256))
-                              ( emptyClaimsSet
-                                    & claimSub .~ Just (vapidSub vapidClaims)
-                                    & claimAud .~ Just (vapidAud vapidClaims)
-                                    & claimExp .~ Just (vapidExp vapidClaims)
-                              )
+                encodedJWTHeader = b64UrlNoPadding . LB.toStrict . A.encode . A.object $
+                    [ "typ" .= ("JWT" :: Text)
+                    , "alg" .= ("ES256" :: Text)
+                    ]
 
-        return $ JOSE.Compact.encodeCompact jwtData
+            in encodedJWTHeader <> "." <> encodedJWTPayload
 
-            ----------------------------
-            {-
-            -- Manual implementation without using the JWT libraries.
-            -- This works as well.
-            -- Kept here mainly as process explanation.
+    -- JWT only accepts SHA256 hash with ECDSA for ES256 signed token
+    encodedJWTSignature <- do
+        -- ECDSA signing vulnerable to timing attacks
+        ECDSA.Signature signR signS <- liftIO $ ECDSA.sign (ECDSA.toPrivateKey vapidKeys)
+                                                            SHA256
+                                                            messageForJWTSignature
 
-            -- JWT base 64 encoding is without padding
-            let messageForJWTSignature = let encodedJWTPayload = b64UrlNoPadding $ LB.toStrict $ A.encode $ A.object $
-                                                 [ "aud" .= (TE.decodeUtf8With TE.lenientDecode $
-                                                                (if secure initReq then "https://" else "http://") ++ (host initReq)
-                                                            )
-                                                 -- jwt expiration time
-                                                 , "exp" .= (formatTime defaultTimeLocale "%s" $ addUTCTime 3000 time)
-                                                 , "sub" .= ("mailto: " ++ (senderEmail pushNotification))
-                                                 ]
+        -- 32 bytes of R followed by 32 bytes of S
+        return $ b64UrlNoPadding $ LB.toStrict $
+                        (Binary.encode $ int32Bytes signR) <>
+                        (Binary.encode $ int32Bytes signS)
 
-                                             encodedJWTHeader = b64UrlNoPadding $ LB.toStrict $ A.encode $ A.object $
-                                                 [ "typ" .= ("JWT" :: Text), "alg" .= ("ES256" :: Text) ]
+    let res = messageForJWTSignature <> "." <> encodedJWTSignature
+    pure . LB.fromStrict $ res
 
-                                         in encodedJWTHeader <> "." <> encodedJWTPayload
-
-            -- JWT only accepts SHA256 hash with ECDSA for ES256 signed token
-            encodedJWTSignature <- do
-                -- ECDSA signing vulnerable to timing attacks
-                ECDSA.Signature signR signS <- liftIO $ ECDSA.sign (ECDSA.toPrivateKey vapidKeys)
-                                                                   SHA256
-                                                                   messageForJWTSignature
-
-                -- 32 bytes of R followed by 32 bytes of S
-                return $ b64UrlNoPadding $ LB.toStrict $
-                             (Binary.encode $ int32Bytes signR) <>
-                             (Binary.encode $ int32Bytes signS)
-
-            return $ Right $ messageForJWTSignature <> "." <> encodedJWTSignature
-            -}
-            ----------------------------
-
-
-
-data PushNotificationMessage = PushNotificationMessage { title :: Text
-                                                       , body :: Text
-                                                       , icon :: Text
-                                                       , url :: Text
-                                                       , tag :: Text
-                                                       }
-
-instance ToJSON PushNotificationMessage where
-   toJSON PushNotificationMessage {..} = A.object
-       [ "title" .= title
-       , "body" .= body
-       , "icon" .= icon
-       , "url" .= url
-       , "tag" .= tag
-       ]
 
 -- All inputs are in raw bytes with no encoding
 -- except for the plaintext for which raw bytes are the Base 64 encoded bytes
