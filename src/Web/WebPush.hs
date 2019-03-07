@@ -1,4 +1,5 @@
-{-# LANGUAGE RecordWildCards, OverloadedStrings, DeriveAnyClass #-}
+{-# LANGUAGE RecordWildCards, OverloadedStrings #-}
+{-# LANGUAGE FlexibleContexts, DeriveAnyClass #-}
 
 module Web.WebPush
     (
@@ -129,18 +130,20 @@ sendPushNotification vapidKeys httpManager pushNotification = do
             subscriptionPublicKeyBytes = B64.URL.decodeLenient . TE.encodeUtf8 $ pushNotification ^. pushP256dh
             -- encode the message to a safe representation like base64URL before sending it to encryption algorithms
             -- decode the message through service workers on browsers before trying to read the JSON
-            plainMessage64Encoded = A.encode . A.toJSON $ (pushNotification ^. pushMessage)
-
-            eitherEncryptionOutput = webPushEncrypt $ EncryptionInput { applicationServerPrivateKey = ecdhServerPrivateKey
-                                                                    , userAgentPublicKeyBytes = subscriptionPublicKeyBytes
-                                                                    , authenticationSecret = authSecretBytes
-                                                                    , salt = randSalt
-                                                                    , plainText = plainMessage64Encoded
-                                                                    , paddingLength = padLen
-                                                                    }
+            plainMessage64Encoded = A.encode . A.toJSON $ pushNotification ^. pushMessage
+            encryptionInput =
+                EncryptionInput
+                    { applicationServerPrivateKey = ecdhServerPrivateKey
+                    , userAgentPublicKeyBytes = subscriptionPublicKeyBytes
+                    , authenticationSecret = authSecretBytes
+                    , salt = randSalt
+                    , plainText = plainMessage64Encoded
+                    , paddingLength = padLen
+                    }
+            eitherEncryptionOutput = webPushEncrypt encryptionInput
         encryptionOutput <- either (throwError . MessageEncryptionFailed) pure eitherEncryptionOutput
         let ecdhServerPublicKeyBytes = LB.toStrict . ecPublicKeyToBytes . ECDH.calculatePublic (ECC.getCurveByName ECC.SEC_p256r1) $ ecdhServerPrivateKey
-        -- content-length is automtically added before making the http request
+            -- content-length is automtically added before making the http request
             authorizationHeader = LB.toStrict $ "WebPush " <> jwt
             cryptoKeyHeader = BS.concat [ "dh=", b64UrlNoPadding ecdhServerPublicKeyBytes
                                         , ";"
@@ -166,17 +169,16 @@ sendPushNotification vapidKeys httpManager pushNotification = do
                             }
 
         eitherResp <- runCatchT . liftIO . httpLbs request $ httpManager
-        either (\err -> case fromException err of
+        either onError pure eitherResp
+    either (pure . Left) (fmap Right . void  . liftIO . print) result -- TODO: make result more verbose
+    where
+        vapidPublicKeyBytestring = LB.toStrict . ecPublicKeyToBytes . ECDSA.public_q . ECDSA.toPublicKey $ vapidKeys
+        onError err = case fromException err of
             Just (HttpExceptionRequest _ (StatusCodeException resp _))
                 -- when the endpoint is invalid, we need to remove it from database
                 | (statusCode (responseStatus resp) == 404) -> throwError RecepientEndpointNotFound
-            _ -> throwError $ PushRequestFailed err) pure eitherResp
-    case result of
-        Left err -> pure $ Left err
-        Right response -> (liftIO $ print response) >> (pure $ Right ()) -- TODO: make result more verbose
-    where
-        vapidPublicKeyBytestring = LB.toStrict . ecPublicKeyToBytes . ECDSA.public_q . ECDSA.toPublicKey $ vapidKeys
-
+            _ -> throwError $ PushRequestFailed err
+            
 
 
 -- |Web push subscription and message details.
