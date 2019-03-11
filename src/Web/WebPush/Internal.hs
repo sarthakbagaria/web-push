@@ -8,8 +8,8 @@ import qualified Data.ByteString                 as BS
 import qualified Data.ByteString.Lazy            as LB
 import Data.Monoid                                             ((<>))
 import Data.Text                                               (Text)
-import Data.Time.Format
-import Data.Time
+import Data.Time.Format                                        (formatTime, defaultTimeLocale)
+import Data.Time                                               (getCurrentTime, addUTCTime)
 import qualified Crypto.PubKey.ECC.Types         as ECC
 import qualified Crypto.PubKey.ECC.ECDSA         as ECDSA
 import qualified Crypto.PubKey.ECC.DH            as ECDH

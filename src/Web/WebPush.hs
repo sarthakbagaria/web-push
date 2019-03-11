@@ -1,5 +1,6 @@
 {-# LANGUAGE RecordWildCards, OverloadedStrings #-}
 {-# LANGUAGE FlexibleContexts, DeriveAnyClass #-}
+{-# LANGUAGE DeriveGeneric #-}
 
 module Web.WebPush
     (
@@ -19,6 +20,7 @@ module Web.WebPush
     , VAPIDKeys
     , VAPIDKeysMinDetails(..)
     , PushNotification
+    , PushNotificationMessage
     , PushNotificationError(..)
     ) where
 
@@ -26,8 +28,10 @@ module Web.WebPush
 import Web.WebPush.Internal
 
 import Crypto.Random                                           (MonadRandom(getRandomBytes))
-import Control.Monad.Except
-import Control.Exception
+import Control.Monad.Except                                    (throwError, runExceptT)
+import Control.Exception                                       (Exception)
+import Control.Lens                                            ((^.), Lens', Lens, lens)
+
 import qualified Crypto.PubKey.ECC.Types         as ECC
 import qualified Crypto.PubKey.ECC.Generate      as ECC
 import qualified Crypto.PubKey.ECC.ECDSA         as ECDSA
@@ -36,6 +40,7 @@ import qualified Crypto.PubKey.ECC.DH            as ECDH
 import qualified Data.Bits                       as Bits
 import Data.Word                                               (Word8)
 
+import GHC.Generics                                            (Generic)
 import GHC.Int                                                 (Int64)
 import qualified Data.List                       as L
 import qualified Data.Text                       as T
@@ -45,7 +50,6 @@ import qualified Data.ByteString                 as BS
 import qualified Data.ByteString.Char8           as C8
 import qualified Data.Aeson                      as A
 import qualified Data.ByteString.Base64.URL      as B64.URL
-
 
 import Network.HTTP.Client                                     (Manager, httpLbs, parseRequest, HttpException(HttpExceptionRequest), HttpExceptionContent(StatusCodeException), RequestBody(..), requestBody, requestHeaders, method, responseStatus)
 import Network.HTTP.Types                                      (hContentType, hAuthorization, hContentEncoding)
@@ -58,7 +62,6 @@ import Control.Monad.Catch.Pure                                (runCatchT)
 import Control.Monad.IO.Class                                  (MonadIO, liftIO)
 
 import System.Random                                           (randomRIO)
-import Control.Lens
 
 
 -- |Generate the 3 integers minimally representing a unique pair of public and private keys.
@@ -170,7 +173,7 @@ sendPushNotification vapidKeys httpManager pushNotification = do
 
         eitherResp <- runCatchT . liftIO . httpLbs request $ httpManager
         either onError pure eitherResp
-    either (pure . Left) (fmap Right . void  . liftIO . print) result -- TODO: make result more verbose
+    either (pure . Left) (const . pure . Right $ ()) result -- TODO: make result more verbose
     where
         vapidPublicKeyBytestring = LB.toStrict . ecPublicKeyToBytes . ECDSA.public_q . ECDSA.toPublicKey $ vapidKeys
         onError err = case fromException err of
@@ -224,6 +227,18 @@ mkPushNotification endpoint p256dh auth =
        , _pnExpireInHours = 1
        , _pnMessage = ()
     }
+
+
+-- |Standard payload for web-pushes (but can be customized by passing
+-- any data to `sendPushNotification`, which has ToJSON instance)
+data PushNotificationMessage = PushNotificationMessage
+    { title :: T.Text
+    , body :: T.Text
+    , icon :: T.Text
+    , url :: T.Text
+    , tag :: T.Text
+    } deriving (Eq, Show, Generic, A.ToJSON)
+
 
 -- |3 integers minimally representing a unique VAPID key pair.
 data VAPIDKeysMinDetails = VAPIDKeysMinDetails { privateNumber :: Integer

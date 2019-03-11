@@ -1,5 +1,5 @@
 name:                web-push
-version:             0.1.2.0
+version:             0.2.0.0
 synopsis:            Send messages using Web Push protocol.
 description:         Please see README.md
 homepage:            https://github.com/sarthakbagaria/web-push#readme
