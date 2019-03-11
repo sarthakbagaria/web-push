@@ -1,5 +1,6 @@
 {-# LANGUAGE RecordWildCards, OverloadedStrings #-}
 {-# LANGUAGE FlexibleContexts, DeriveAnyClass #-}
+{-# LANGUAGE DeriveGeneric #-}
 
 module Web.WebPush
     (
@@ -39,6 +40,7 @@ import qualified Crypto.PubKey.ECC.DH            as ECDH
 import qualified Data.Bits                       as Bits
 import Data.Word                                               (Word8)
 
+import GHC.Generics                                            (Generic)
 import GHC.Int                                                 (Int64)
 import qualified Data.List                       as L
 import qualified Data.Text                       as T
@@ -48,7 +50,6 @@ import qualified Data.ByteString                 as BS
 import qualified Data.ByteString.Char8           as C8
 import qualified Data.Aeson                      as A
 import qualified Data.ByteString.Base64.URL      as B64.URL
-import Data.Aeson                                              ((.=))
 
 import Network.HTTP.Client                                     (Manager, httpLbs, parseRequest, HttpException(HttpExceptionRequest), HttpExceptionContent(StatusCodeException), RequestBody(..), requestBody, requestHeaders, method, responseStatus)
 import Network.HTTP.Types                                      (hContentType, hAuthorization, hContentEncoding)
@@ -236,17 +237,7 @@ data PushNotificationMessage = PushNotificationMessage
     , icon :: T.Text
     , url :: T.Text
     , tag :: T.Text
-    } deriving (Eq, Show)
-
-
-instance A.ToJSON PushNotificationMessage where
-    toJSON PushNotificationMessage {..} = A.object
-        [ "title" .= title
-        , "body" .= body
-        , "icon" .= icon
-        , "url" .= url
-        , "tag" .= tag
-        ]
+    } deriving (Eq, Show, Generic, A.ToJSON)
 
 
 -- |3 integers minimally representing a unique VAPID key pair.
