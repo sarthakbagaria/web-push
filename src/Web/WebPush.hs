@@ -20,7 +20,7 @@ module Web.WebPush
     , VAPIDKeys
     , VAPIDKeysMinDetails(..)
     , PushNotification
-    , PushNotificationMessage
+    , PushNotificationMessage(..)
     , PushNotificationError(..)
     ) where
 
@@ -181,7 +181,7 @@ sendPushNotification vapidKeys httpManager pushNotification = do
                 -- when the endpoint is invalid, we need to remove it from database
                 | (statusCode (responseStatus resp) == 404) -> throwError RecepientEndpointNotFound
             _ -> throwError $ PushRequestFailed err
-            
+
 
 
 -- |Web push subscription and message details.

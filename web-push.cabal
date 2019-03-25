@@ -45,7 +45,7 @@ test-suite web-push-test
   ghc-options:         -Wall
   build-depends:       base
                      , web-push
-                     , hspec                         >= 2.4.3      && <= 2.6.0
+                     , hspec                         >= 2.4.3      && <= 2.7.0
                      , bytestring                    >= 0.9        && < 0.11
                      , base64-bytestring             >= 1.0.0.1    && < 1.1
                      , binary                        >= 0.7.5      && < 0.9
