@@ -1,0 +1,5 @@
+<h1>Web Push Example
+
+<p>Enter text to send in notification.
+<input id="notificationText" type="text" maxlength="100">
+<button onclick="sendPushNotification($('#notificationText').val());">Send

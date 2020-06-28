@@ -5,6 +5,7 @@ docker:
 
 packages:
 - '.'
+- '..'
 
 extra-deps: []
 

@@ -6,7 +6,6 @@ import GHC.Int                                                 (Int64)
 import Data.ByteString                                         (ByteString)
 import qualified Data.ByteString                 as BS
 import qualified Data.ByteString.Lazy            as LB
-import Data.Monoid                                             ((<>))
 import Data.Text                                               (Text)
 import Data.Time.Format                                        (formatTime, defaultTimeLocale)
 import Data.Time                                               (getCurrentTime, addUTCTime)
@@ -38,8 +37,8 @@ type VAPIDKeys = ECDSA.KeyPair
 
 ----------------------------
 -- Manual implementation without using the JWT libraries.
--- This works as well.
--- Kept here mainly as process explanation.
+-- Not using jose library. Check the below link for reason:
+-- https://github.com/sarthakbagaria/web-push/pull/1#issuecomment-471254455
 webPushJWT :: MonadIO m => VAPIDKeys -> Request -> T.Text -> m LB.ByteString
 webPushJWT vapidKeys initReq senderEmail = do
     -- JWT base 64 encoding is without padding
@@ -107,7 +106,6 @@ webPushEncrypt EncryptionInput {..} =
         userAgentPublicKey = ecBytesToPublicKey userAgentPublicKeyBytes
         sharedECDHSecret = ECDH.getShared (ECC.getCurveByName ECC.SEC_p256r1) applicationServerPrivateKey userAgentPublicKey
 
-
         -- HMAC key derivation (HKDF, here expanded into HMAC steps as specified in web push encryption spec)
         pseudoRandomKeyCombine = HMAC.hmac authenticationSecret sharedECDHSecret :: HMAC.HMAC SHA256
         authInfo = "Content-Encoding: auth" <> "\x00" :: ByteString
@@ -123,7 +121,6 @@ webPushEncrypt EncryptionInput {..} =
 
         nonceContext = "Content-Encoding: nonce" <> "\x00" <> context
         nonce = BS.pack $ take 12 $ ByteArray.unpack (HMAC.hmac pseudoRandomKeyEncryption (nonceContext <> "\x01") :: HMAC.HMAC SHA256)
-
 
         -- HMAC a doesn't have Show instance needed for test suite
         -- so we extract the bytes and store that in WebPushEncryptionOutput
@@ -161,10 +158,8 @@ webPushEncrypt EncryptionInput {..} =
                         in Right $ EncryptionOutput {..}
 
 
-
 -- Conversions among integers and bytes
 -- The bytes are in network/big endian order.
-
  {-
     -- DON'T use DER encoding to extract integer bytes
     -- if a 32 byte number can be written in less bytes with leading zeros,

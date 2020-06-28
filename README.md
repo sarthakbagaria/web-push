@@ -1,18 +1,18 @@
-# web-push
+# web-push [![Hackage](https://img.shields.io/hackage/v/web-push.svg)](https://hackage.haskell.org/package/web-push)
 
 Helper functions to send messages using Web Push protocol.
 
 ## Usage
 
-The `sendPushNotification` function encodes the message into Base64 URL form before encrypting and sending. Decode the message in Service Worker notification handler in browser before trying to read the JSON message.
+Guides to using Web Push API in browsers can be found on [Mozilla's](https://developer.mozilla.org/en/docs/Web/API/Push_API) and [Google's](https://developers.google.com/web/fundamentals/engage-and-retain/push-notifications/) docs, or you can check out the demo app in the example folder. To run the demo app:
 
-Guides to using Web Push API in browsers can be found on [Mozilla's](https://developer.mozilla.org/en/docs/Web/API/Push_API) and [Google's](https://developers.google.com/web/fundamentals/engage-and-retain/push-notifications/) docs, or you can check out [this](https://gist.github.com/sarthakbagaria/c08c0d7b84e1165760bb429a4064cfff) _untested_ Yesod app demonstrating the use of this library.
+    cd example
+    stack build
+    stack --docker-network=bridge --docker-run-args='--publish=3000:3000' exec web-push-example
 
-## To Do
+Then access localhost:3000 from a browser. Keep the browser console open to check if there are errors. For use with docker, the above command requires [stack](https://docs.haskellstack.org/en/stable/README/) 2.4 or above.
 
-- Add recognition of more error/status codes from send notification HTTP response.
-- Clearly differentiate between ByteString encodings (Raw, Base64URL etc).
-- Extend tests to verify that push messages are sent properly.
+For production use, store a set of VAPID keys securely and use them for all push notification subscriptions and messages; public key will have to be exposed to client's browser when subscribing to push notifications, but private key must be kept secret and used when generating push notifications on the server. If VAPID keys are re-generated, all push notifications will require re-subscriptions. Also save the latest subscription details such as endpoint from user's browser session securely in the database and use them to send push notifications to the user later.
 
 ## References
 

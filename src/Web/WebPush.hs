@@ -1,6 +1,7 @@
 {-# LANGUAGE RecordWildCards, OverloadedStrings #-}
 {-# LANGUAGE FlexibleContexts, DeriveAnyClass #-}
 {-# LANGUAGE DeriveGeneric #-}
+{-# LANGUAGE ScopedTypeVariables #-}
 
 module Web.WebPush
     (
@@ -13,7 +14,7 @@ module Web.WebPush
     , pushP256dh
     , pushAuth
     , pushSenderEmail
-    , pushExpireInHours
+    , pushExpireInSeconds
     , pushMessage
     , mkPushNotification
     -- * Types
@@ -22,13 +23,15 @@ module Web.WebPush
     , PushNotification
     , PushNotificationMessage(..)
     , PushNotificationError(..)
+    , PushEndpoint
+    , PushP256dh
+    , PushAuth
     ) where
 
 
 import Web.WebPush.Internal
 
 import Crypto.Random                                           (MonadRandom(getRandomBytes))
-import Control.Monad.Except                                    (throwError, runExceptT)
 import Control.Exception                                       (Exception)
 import Control.Lens                                            ((^.), Lens', Lens, lens)
 
@@ -51,22 +54,24 @@ import qualified Data.ByteString.Char8           as C8
 import qualified Data.Aeson                      as A
 import qualified Data.ByteString.Base64.URL      as B64.URL
 
-import Network.HTTP.Client                                     (Manager, httpLbs, parseRequest, HttpException(HttpExceptionRequest), HttpExceptionContent(StatusCodeException), RequestBody(..), requestBody, requestHeaders, method, responseStatus)
+import Network.HTTP.Client                                     (Manager, httpLbs, parseUrlThrow, HttpException(HttpExceptionRequest)
+                                                               , HttpExceptionContent(StatusCodeException), RequestBody(..)
+                                                               , requestBody, requestHeaders, method, responseStatus)
 import Network.HTTP.Types                                      (hContentType, hAuthorization, hContentEncoding)
 import Network.HTTP.Types.Status                               (Status(statusCode))
 
 import Crypto.Error                                            (CryptoError)
 
-import Control.Exception.Base                                  (SomeException(..), fromException)
-import Control.Monad.Catch.Pure                                (runCatchT)
 import Control.Monad.IO.Class                                  (MonadIO, liftIO)
+import Control.Exception.Base                                  (SomeException(..), fromException, toException, throw)
+import Control.Exception.Safe                                  (tryAny, handleAny)
 
 import System.Random                                           (randomRIO)
 
 
 -- |Generate the 3 integers minimally representing a unique pair of public and private keys.
 --
--- Store them in configuration and use them across multiple push notification requests.
+-- Store them securely and use them across multiple push notification requests.
 generateVAPIDKeys :: MonadRandom m => m VAPIDKeysMinDetails
 generateVAPIDKeys = do
     -- SEC_p256r1 is the NIST P-256
@@ -86,8 +91,9 @@ readVAPIDKeys VAPIDKeysMinDetails {..} =
 
 
 -- |Pass the VAPID public key bytes to browser when subscribing to push notifications.
--- Generate application server key using
--- applicationServerKey = new Uint8Array(vapidPublicKeyBytes) in Javascript.
+-- Generate application server key browser using:
+--
+-- > applicationServerKey = new Uint8Array( #{toJSON vapidPublicKeyBytes} )
 vapidPublicKeyBytes :: VAPIDKeys -> [Word8]
 vapidPublicKeyBytes keys =
    let ECC.Point vapidPublicKeyX vapidPublicKeyY = ECDSA.public_q $ ECDSA.toPublicKey keys
@@ -104,29 +110,21 @@ vapidPublicKeyBytes keys =
                                               ([1..32] :: [Int])
 
 
--- References:
--- NOTE: these references are drafts; the current implementation is based on the versions given below.
--- https://tools.ietf.org/html/draft-ietf-webpush-encryption-04
--- https://tools.ietf.org/html/draft-ietf-httpbis-encryption-encoding-02
--- https://tools.ietf.org/html/draft-ietf-webpush-protocol-10
--- https://tools.ietf.org/html/draft-ietf-webpush-vapid-01
-
--- |Send a Push Message.
--- The message sent is Base64 URL encoded.
--- Decode the message in Service Worker notification handler in browser before trying to read the JSON.
+-- |Send a Push Message. Read the message in Service Worker notification handler in browser:
+--
+-- > self.addEventListener('push', function(event){ console.log(event.data.json()); });
 sendPushNotification :: (MonadIO m, A.ToJSON msg)
                      => VAPIDKeys
                      -> Manager
                      -> PushNotification msg
                      -> m (Either PushNotificationError ())
 sendPushNotification vapidKeys httpManager pushNotification = do
-    eitherInitReq <- runCatchT . parseRequest . T.unpack $ pushNotification ^. pushEndpoint
-    result <- runExceptT $ do
-        initReq <- either (throwError . EndpointParseFailed) pure eitherInitReq
+    result <- liftIO $ tryAny $ do
+        initReq <- handleAny (throw . EndpointParseFailed) $ parseUrlThrow . T.unpack $ pushNotification ^. pushEndpoint
         jwt <- webPushJWT vapidKeys initReq (pushNotification ^. pushSenderEmail)
-        ecdhServerPrivateKey <- liftIO $ ECDH.generatePrivate $ ECC.getCurveByName ECC.SEC_p256r1
-        randSalt <- liftIO $ getRandomBytes 16
-        padLen <- liftIO $ randomRIO (0, 20)
+        ecdhServerPrivateKey <- ECDH.generatePrivate $ ECC.getCurveByName ECC.SEC_p256r1
+        randSalt <- getRandomBytes 16
+        padLen <- randomRIO (0, 20)
 
         let authSecretBytes = B64.URL.decodeLenient . TE.encodeUtf8 $ pushNotification ^. pushAuth
             -- extract the 65 bytes of ECDH uncompressed public key received from browser in subscription
@@ -144,7 +142,7 @@ sendPushNotification vapidKeys httpManager pushNotification = do
                     , paddingLength = padLen
                     }
             eitherEncryptionOutput = webPushEncrypt encryptionInput
-        encryptionOutput <- either (throwError . MessageEncryptionFailed) pure eitherEncryptionOutput
+        encryptionOutput <- either (throw . toException . MessageEncryptionFailed) pure eitherEncryptionOutput
         let ecdhServerPublicKeyBytes = LB.toStrict . ecPublicKeyToBytes . ECDH.calculatePublic (ECC.getCurveByName ECC.SEC_p256r1) $ ecdhServerPrivateKey
             -- content-length is automtically added before making the http request
             authorizationHeader = LB.toStrict $ "WebPush " <> jwt
@@ -152,7 +150,7 @@ sendPushNotification vapidKeys httpManager pushNotification = do
                                         , ";"
                                         , "p256ecdsa=", b64UrlNoPadding vapidPublicKeyBytestring
                                         ]
-            postHeaders = [ ("TTL", C8.pack $ show (60 * 60 * (pushNotification ^. pushExpireInHours)))
+            postHeaders = [ ("TTL", C8.pack $ show $ pushNotification ^. pushExpireInSeconds)
                            , (hContentType, "application/octet-stream")
                            , (hAuthorization, authorizationHeader)
                            , ("Crypto-Key", cryptoKeyHeader)
@@ -170,67 +168,72 @@ sendPushNotification vapidKeys httpManager pushNotification = do
                                 -- without URL encoding
                             , requestBody = RequestBodyBS $ encryptedMessage encryptionOutput
                             }
+        httpLbs request $ httpManager
+    return $ either (Left . onError) (Right . (const ())) result
 
-        eitherResp <- runCatchT . liftIO . httpLbs request $ httpManager
-        either onError pure eitherResp
-    either (pure . Left) (const . pure . Right $ ()) result -- TODO: make result more verbose
     where
         vapidPublicKeyBytestring = LB.toStrict . ecPublicKeyToBytes . ECDSA.public_q . ECDSA.toPublicKey $ vapidKeys
-        onError err = case fromException err of
-            Just (HttpExceptionRequest _ (StatusCodeException resp _))
+        onError :: SomeException -> PushNotificationError
+        onError err
+            | Just (x :: PushNotificationError) <- fromException err = x
+            | Just (HttpExceptionRequest _ (StatusCodeException resp _)) <- fromException err = case statusCode (responseStatus resp) of
                 -- when the endpoint is invalid, we need to remove it from database
-                | (statusCode (responseStatus resp) == 404) -> throwError RecepientEndpointNotFound
-            _ -> throwError $ PushRequestFailed err
+                404 -> RecepientEndpointNotFound
+                410 -> RecepientEndpointNotFound
+                _ -> PushRequestFailed err
+            | otherwise = PushRequestFailed err
 
 
+type PushEndpoint = T.Text
+type PushP256dh = T.Text
+type PushAuth = T.Text
 
--- |Web push subscription and message details.
---
--- Get subscription details from front end using
--- subscription.endpoint,
--- subscription.toJSON().keys.p256dh and
--- subscription.toJSON().keys.auth.
--- Save subscription details to send messages to the endpoint in future.
-data PushNotification msg = PushNotification {  _pnEndpoint :: T.Text
-                                              , _pnP256dh :: T.Text
-                                              , _pnAuth :: T.Text
+-- |Web push subscription and message details. Use 'mkPushNotification' to construct push notification.
+data PushNotification msg = PushNotification {  _pnEndpoint :: PushEndpoint
+                                              , _pnP256dh :: PushP256dh
+                                              , _pnAuth :: PushAuth
                                               , _pnSenderEmail :: T.Text
-                                              , _pnExpireInHours :: Int64
+                                              , _pnExpireInSeconds :: Int64
                                               , _pnMessage :: msg
                                               }
 
-pushEndpoint :: Lens' (PushNotification msg) T.Text
+pushEndpoint :: Lens' (PushNotification msg) PushEndpoint
 pushEndpoint = lens _pnEndpoint (\d v -> d {_pnEndpoint = v})
 
-pushP256dh :: Lens' (PushNotification msg) T.Text
+pushP256dh :: Lens' (PushNotification msg) PushP256dh
 pushP256dh = lens _pnP256dh (\d v -> d {_pnP256dh = v})
 
-pushAuth :: Lens' (PushNotification msg) T.Text
+pushAuth :: Lens' (PushNotification msg) PushAuth
 pushAuth = lens _pnAuth (\d v -> d {_pnAuth = v})
 
 pushSenderEmail :: Lens' (PushNotification msg) T.Text
 pushSenderEmail = lens _pnSenderEmail (\d v -> d {_pnSenderEmail = v})
 
-pushExpireInHours :: Lens' (PushNotification msg) Int64
-pushExpireInHours = lens _pnExpireInHours (\d v -> d {_pnExpireInHours = v})
+pushExpireInSeconds :: Lens' (PushNotification msg) Int64
+pushExpireInSeconds = lens _pnExpireInSeconds (\d v -> d {_pnExpireInSeconds = v})
 
 pushMessage :: (A.ToJSON msg) => Lens (PushNotification a) (PushNotification msg) a msg
 pushMessage = lens _pnMessage (\d v -> d {_pnMessage = v})
 
-mkPushNotification :: T.Text -> T.Text -> T.Text -> PushNotification ()
+-- |Constuct a push notification.
+--
+-- 'PushEndpoint', 'PushP256dh' and 'PushAuth' should be obtained from push subscription in client's browser.
+-- Push message can be set through 'pushMessage'; text and json messages are usually supported by browsers.
+-- 'pushSenderEmail' and 'pushExpireInSeconds' can be used to set additional details.
+mkPushNotification :: PushEndpoint -> PushP256dh -> PushAuth -> PushNotification ()
 mkPushNotification endpoint p256dh auth =
     PushNotification {
          _pnEndpoint = endpoint
        , _pnP256dh = p256dh
        , _pnAuth = auth
        , _pnSenderEmail = ""
-       , _pnExpireInHours = 1
+       , _pnExpireInSeconds = 3600
        , _pnMessage = ()
     }
 
-
--- |Standard payload for web-pushes (but can be customized by passing
--- any data to `sendPushNotification`, which has ToJSON instance)
+-- |Example payload structure for web-push.
+-- Any datatype with JSON instance can also be used instead.
+-- See 'mkPushNotification'.
 data PushNotificationMessage = PushNotificationMessage
     { title :: T.Text
     , body :: T.Text
@@ -240,7 +243,7 @@ data PushNotificationMessage = PushNotificationMessage
     } deriving (Eq, Show, Generic, A.ToJSON)
 
 
--- |3 integers minimally representing a unique VAPID key pair.
+-- |3 integers minimally representing a unique VAPID public-private key pair.
 data VAPIDKeysMinDetails = VAPIDKeysMinDetails { privateNumber :: Integer
                                                , publicCoordX :: Integer
                                                , publicCoordY :: Integer
@@ -248,7 +251,7 @@ data VAPIDKeysMinDetails = VAPIDKeysMinDetails { privateNumber :: Integer
 
 -- |'RecepientEndpointNotFound' comes up when the endpoint is no longer recognized by the push service.
 -- This may happen if the user has cancelled the push subscription, and hence deleted the endpoint.
--- You may want to delete the endpoint from database in this case.
+-- You may want to delete the endpoint from database in this case, or if 'EndpointParseFailed'.
 data PushNotificationError = EndpointParseFailed SomeException
                            | MessageEncryptionFailed CryptoError
                            | RecepientEndpointNotFound
