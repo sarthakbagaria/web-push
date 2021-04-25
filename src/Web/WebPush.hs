@@ -21,7 +21,6 @@ module Web.WebPush
     , VAPIDKeys
     , VAPIDKeysMinDetails(..)
     , PushNotification
-    , PushNotificationMessage(..)
     , PushNotificationError(..)
     , PushEndpoint
     , PushP256dh
@@ -230,18 +229,6 @@ mkPushNotification endpoint p256dh auth =
        , _pnExpireInSeconds = 3600
        , _pnMessage = ()
     }
-
--- |Example payload structure for web-push.
--- Any datatype with JSON instance can also be used instead.
--- See 'mkPushNotification'.
-data PushNotificationMessage = PushNotificationMessage
-    { title :: T.Text
-    , body :: T.Text
-    , icon :: T.Text
-    , url :: T.Text
-    , tag :: T.Text
-    } deriving (Eq, Show, Generic, A.ToJSON)
-
 
 -- |3 integers minimally representing a unique VAPID public-private key pair.
 data VAPIDKeysMinDetails = VAPIDKeysMinDetails { privateNumber :: Integer

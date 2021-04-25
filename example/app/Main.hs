@@ -13,6 +13,14 @@ import Data.Text (pack, Text)
 import Control.Monad.IO.Class (liftIO)
 import Data.Aeson (toJSON)
 
+data PushNotificationMessage = PushNotificationMessage
+    { title :: T.Text
+    , body :: T.Text
+    , icon :: T.Text
+    , url :: T.Text
+    , tag :: T.Text
+    } deriving (Eq, Show, Generic, A.ToJSON)
+
 data App = App { appManager :: Manager
                , appConfigVAPIDKeys :: WP.VAPIDKeys
                }
