@@ -43,12 +43,13 @@ webPushJWT :: MonadIO m => VAPIDKeys -> Request -> T.Text -> m LB.ByteString
 webPushJWT vapidKeys initReq senderEmail = do
     -- JWT base 64 encoding is without padding
     time <- liftIO getCurrentTime
+    let timeStamp = read (formatTime defaultTimeLocale "%s" $ addUTCTime 3000 time) :: Int -- jwt expiration time
     let messageForJWTSignature =
             let proto = if secure initReq then "https://" else "http://"
                 encodedJWTPayload = b64UrlNoPadding . LB.toStrict . A.encode . A.object $
                     [ "aud" .= (TE.decodeUtf8With TE.lenientDecode $ proto <> (host initReq))
-                    , "exp" .= (formatTime defaultTimeLocale "%s" $ addUTCTime 3000 time) -- jwt expiration time
-                    , "sub" .= ("mailto: " <> senderEmail)
+                    , "exp" .= timeStamp
+                    , "sub" .= ("mailto:" <> senderEmail)
                     ]
 
                 encodedJWTHeader = b64UrlNoPadding . LB.toStrict . A.encode . A.object $
@@ -57,7 +58,6 @@ webPushJWT vapidKeys initReq senderEmail = do
                     ]
 
             in encodedJWTHeader <> "." <> encodedJWTPayload
-
     -- JWT only accepts SHA256 hash with ECDSA for ES256 signed token
     encodedJWTSignature <- do
         -- ECDSA signing vulnerable to timing attacks
