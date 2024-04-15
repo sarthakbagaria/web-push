@@ -2,6 +2,7 @@
 {-# LANGUAGE FlexibleContexts, DeriveAnyClass #-}
 {-# LANGUAGE DeriveGeneric #-}
 {-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE TupleSections #-}
 
 module Web.WebPush
     (
@@ -15,6 +16,8 @@ module Web.WebPush
     , pushAuth
     , pushSenderEmail
     , pushExpireInSeconds
+    , pushUrgency
+    , pushTopic
     , pushMessage
     , mkPushNotification
     -- * Types
@@ -25,6 +28,8 @@ module Web.WebPush
     , PushEndpoint
     , PushP256dh
     , PushAuth
+    , PushUrgency (..)
+    , PushTopic
     ) where
 
 
@@ -40,6 +45,7 @@ import qualified Crypto.PubKey.ECC.ECDSA         as ECDSA
 import qualified Crypto.PubKey.ECC.DH            as ECDH
 
 import qualified Data.Bits                       as Bits
+import Data.Maybe                                              (catMaybes)
 import Data.Word                                               (Word8)
 
 import GHC.Generics                                            (Generic)
@@ -149,13 +155,17 @@ sendPushNotification vapidKeys httpManager pushNotification = do
                                         , ";"
                                         , "p256ecdsa=", b64UrlNoPadding vapidPublicKeyBytestring
                                         ]
+
+            hUrgency = ("Urgency",) . C8.pack . show <$> (pushNotification ^. pushUrgency)
+            hTopic = ("Topic",) . C8.pack . T.unpack <$> (pushNotification ^. pushTopic)
+
             postHeaders = [ ("TTL", C8.pack $ show $ pushNotification ^. pushExpireInSeconds)
                            , (hContentType, "application/octet-stream")
                            , (hAuthorization, authorizationHeader)
                            , ("Crypto-Key", cryptoKeyHeader)
                            , (hContentEncoding, "aesgcm")
                            , ("Encryption", "salt=" <> (b64UrlNoPadding randSalt))
-                          ]
+                          ] ++ catMaybes [hUrgency, hTopic]
 
             request = initReq { method = "POST"
                             , requestHeaders = postHeaders ++
@@ -167,6 +177,7 @@ sendPushNotification vapidKeys httpManager pushNotification = do
                                 -- without URL encoding
                             , requestBody = RequestBodyBS $ encryptedMessage encryptionOutput
                             }
+
         httpLbs request $ httpManager
     return $ either (Left . onError) (Right . (const ())) result
 
@@ -186,6 +197,15 @@ sendPushNotification vapidKeys httpManager pushNotification = do
 type PushEndpoint = T.Text
 type PushP256dh = T.Text
 type PushAuth = T.Text
+type PushTopic = T.Text
+
+data PushUrgency = PushUrgencyVeryLow | PushUrgencyLow | PushUrgencyNormal | PushUrgencyHigh
+
+instance Show PushUrgency where
+    show PushUrgencyVeryLow = "very-low"
+    show PushUrgencyLow = "low"
+    show PushUrgencyNormal = "normal"
+    show PushUrgencyHigh = "high"
 
 -- |Web push subscription and message details. Use 'mkPushNotification' to construct push notification.
 data PushNotification msg = PushNotification {  _pnEndpoint :: PushEndpoint
@@ -193,6 +213,8 @@ data PushNotification msg = PushNotification {  _pnEndpoint :: PushEndpoint
                                               , _pnAuth :: PushAuth
                                               , _pnSenderEmail :: T.Text
                                               , _pnExpireInSeconds :: Int64
+                                              , _pnUrgency :: Maybe PushUrgency
+                                              , _pnTopic   :: Maybe PushTopic
                                               , _pnMessage :: msg
                                               }
 
@@ -211,6 +233,12 @@ pushSenderEmail = lens _pnSenderEmail (\d v -> d {_pnSenderEmail = v})
 pushExpireInSeconds :: Lens' (PushNotification msg) Int64
 pushExpireInSeconds = lens _pnExpireInSeconds (\d v -> d {_pnExpireInSeconds = v})
 
+pushUrgency :: Lens' (PushNotification msg) (Maybe PushUrgency)
+pushUrgency = lens _pnUrgency (\d v -> d {_pnUrgency = v})
+
+pushTopic :: Lens' (PushNotification msg) (Maybe PushTopic)
+pushTopic = lens _pnTopic (\d v -> d {_pnTopic = v})
+
 pushMessage :: (A.ToJSON msg) => Lens (PushNotification a) (PushNotification msg) a msg
 pushMessage = lens _pnMessage (\d v -> d {_pnMessage = v})
 
@@ -227,6 +255,8 @@ mkPushNotification endpoint p256dh auth =
        , _pnAuth = auth
        , _pnSenderEmail = ""
        , _pnExpireInSeconds = 3600
+       , _pnUrgency = Nothing
+       , _pnTopic = Nothing
        , _pnMessage = ()
     }
 
