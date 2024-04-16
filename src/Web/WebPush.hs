@@ -29,7 +29,7 @@ module Web.WebPush
     , PushP256dh
     , PushAuth
     , PushUrgency (..)
-    , PushTopic
+    , PushTopic (..)
     ) where
 
 
@@ -157,7 +157,7 @@ sendPushNotification vapidKeys httpManager pushNotification = do
                                         ]
 
             hUrgency = ("Urgency",) . C8.pack . show <$> (pushNotification ^. pushUrgency)
-            hTopic = ("Topic",) . C8.pack . T.unpack <$> (pushNotification ^. pushTopic)
+            hTopic = ("Topic",) . C8.pack . T.unpack . getToken <$> (pushNotification ^. pushTopic)
 
             postHeaders = [ ("TTL", C8.pack $ show $ pushNotification ^. pushExpireInSeconds)
                            , (hContentType, "application/octet-stream")
@@ -197,9 +197,16 @@ sendPushNotification vapidKeys httpManager pushNotification = do
 type PushEndpoint = T.Text
 type PushP256dh = T.Text
 type PushAuth = T.Text
-type PushTopic = T.Text
 
-data PushUrgency = PushUrgencyVeryLow | PushUrgencyLow | PushUrgencyNormal | PushUrgencyHigh
+-- | The @Topic@ header field MUST be restricted to no more than 32 characters
+-- from the URL and filename safe Base 64 alphabet [RFC4648](https://datatracker.ietf.org/doc/html/rfc4648).
+newtype PushTopic = PushTopic { getToken :: T.Text }
+
+-- | @Urgency@ header field.
+data PushUrgency = PushUrgencyVeryLow -- ^ very-low
+                 | PushUrgencyLow     -- ^ low
+                 | PushUrgencyNormal  -- ^ normal
+                 | PushUrgencyHigh    -- ^ high
 
 instance Show PushUrgency where
     show PushUrgencyVeryLow = "very-low"
